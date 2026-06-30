@@ -26,7 +26,7 @@ on:
         default: 'all'
 
 concurrency:
-  group: build-${{ github.ref }}-${{ matrix.service }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 env:
