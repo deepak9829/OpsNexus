@@ -174,10 +174,16 @@ resource "aws_iam_role_policy" "github_actions" {
         Action = [
           "ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath",
           "ssm:PutParameter", "ssm:DeleteParameter", "ssm:DeleteParameters",
-          "ssm:DescribeParameters", "ssm:GetParameterHistory",
-          "ssm:AddTagsToResource", "ssm:ListTagsForResource",
+          "ssm:GetParameterHistory", "ssm:AddTagsToResource", "ssm:ListTagsForResource",
         ]
         Resource = "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/opsnexus/*"
+      },
+      {
+        # DescribeParameters operates on the SSM service, not individual parameter ARNs
+        Sid      = "SSMDescribeParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:DescribeParameters"]
+        Resource = "*"
       },
       {
         Sid      = "CloudFrontInvalidation"

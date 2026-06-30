@@ -11,6 +11,8 @@
 ################################################################################
 
 data "aws_caller_identity" "current" {}
+data "aws_canonical_user_id" "current" {}
+data "aws_cloudfront_log_delivery_canonical_user_id" "cloudfront" {}
 
 locals {
   bucket_name      = "${var.project_name}-${var.environment}-frontend-${data.aws_caller_identity.current.account_id}"
@@ -66,8 +68,28 @@ resource "aws_s3_bucket_ownership_controls" "logs" {
 
 resource "aws_s3_bucket_acl" "logs" {
   bucket     = aws_s3_bucket.logs.id
-  acl        = "private"
   depends_on = [aws_s3_bucket_ownership_controls.logs]
+
+  access_control_policy {
+    owner {
+      id = data.aws_canonical_user_id.current.id
+    }
+    # CloudFront log delivery service needs FULL_CONTROL to write access logs.
+    grant {
+      grantee {
+        type = "CanonicalUser"
+        id   = data.aws_cloudfront_log_delivery_canonical_user_id.cloudfront.id
+      }
+      permission = "FULL_CONTROL"
+    }
+    grant {
+      grantee {
+        type = "CanonicalUser"
+        id   = data.aws_canonical_user_id.current.id
+      }
+      permission = "FULL_CONTROL"
+    }
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "logs" {
