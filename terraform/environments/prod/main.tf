@@ -63,11 +63,11 @@ locals {
     { "caylent:owner" = var.caylent_owner },
     var.caylent_customer != "" ? { "caylent:customer" = var.caylent_customer } : {},
     var.caylent_workload != "" ? { "caylent:workload" = var.caylent_workload } : {},
-    var.caylent_project  != "" ? { "caylent:project"  = var.caylent_project  } : {},
+    var.caylent_project != "" ? { "caylent:project" = var.caylent_project } : {},
     {
       Environment = var.environment
       ManagedBy   = "Terraform"
-      Project      = var.project_name
+      Project     = var.project_name
     }
   )
 }

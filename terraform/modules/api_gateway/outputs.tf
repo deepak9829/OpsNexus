@@ -42,8 +42,8 @@ output "usage_plan_ids" {
   }
 }
 
-output "usage_plan_basic_id"      { value = aws_api_gateway_usage_plan.basic.id }
-output "usage_plan_pro_id"        { value = aws_api_gateway_usage_plan.pro.id }
+output "usage_plan_basic_id" { value = aws_api_gateway_usage_plan.basic.id }
+output "usage_plan_pro_id" { value = aws_api_gateway_usage_plan.pro.id }
 output "usage_plan_enterprise_id" { value = aws_api_gateway_usage_plan.enterprise.id }
 
 output "internal_api_key_secret_arn" {

@@ -35,9 +35,9 @@ resource "aws_subnet" "private_eks" {
   availability_zone = var.availability_zones[count.index]
 
   tags = {
-    Name                                                                        = "${var.project_name}-${var.environment}-private-eks-${substr(var.availability_zones[count.index], -2, -1)}"
-    "kubernetes.io/role/internal-elb"                                           = "1"
-    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks"          = "owned"
+    Name                                                               = "${var.project_name}-${var.environment}-private-eks-${substr(var.availability_zones[count.index], -2, -1)}"
+    "kubernetes.io/role/internal-elb"                                  = "1"
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "owned"
   }
 }
 

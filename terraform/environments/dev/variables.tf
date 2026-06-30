@@ -18,11 +18,11 @@ variable "project_name" {
   default = "opsnexus"
 }
 
-variable "vpc_cidr"                 { type = string }
-variable "availability_zones"       { type = list(string) }
-variable "public_subnet_cidrs"      { type = list(string) }
+variable "vpc_cidr" { type = string }
+variable "availability_zones" { type = list(string) }
+variable "public_subnet_cidrs" { type = list(string) }
 variable "private_eks_subnet_cidrs" { type = list(string) }
-variable "private_db_subnet_cidrs"  { type = list(string) }
+variable "private_db_subnet_cidrs" { type = list(string) }
 
 variable "db_instance_class" {
   type    = string

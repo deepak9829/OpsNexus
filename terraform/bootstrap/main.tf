@@ -31,9 +31,9 @@ resource "aws_s3_bucket" "tf_state" {
   bucket        = "opsnexus-tf-state"
   force_destroy = false
   tags = {
-    Name        = "opsnexus-tf-state"
-    ManagedBy   = "Terraform"
-    Purpose     = "Terraform state storage"
+    Name      = "opsnexus-tf-state"
+    ManagedBy = "Terraform"
+    Purpose   = "Terraform state storage"
   }
 }
 
@@ -86,7 +86,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? (
     aws_iam_openid_connect_provider.github[0].arn
-  ) : (
+    ) : (
     data.aws_iam_openid_connect_provider.github[0].arn
   )
 }
@@ -142,9 +142,9 @@ resource "aws_iam_role_policy" "github_actions" {
         ]
       },
       {
-        Sid      = "ECRAccess"
-        Effect   = "Allow"
-        Action   = [
+        Sid    = "ECRAccess"
+        Effect = "Allow"
+        Action = [
           "ecr:GetAuthorizationToken",
           "ecr:BatchCheckLayerAvailability",
           "ecr:GetDownloadUrlForLayer",
@@ -169,15 +169,15 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "*"
       },
       {
-        Sid    = "SSMParameterAccess"
-        Effect = "Allow"
-        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Sid      = "SSMParameterAccess"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
         Resource = "arn:aws:ssm:ap-southeast-1:${data.aws_caller_identity.current.account_id}:parameter/opsnexus/*"
       },
       {
-        Sid    = "CloudFrontInvalidation"
-        Effect = "Allow"
-        Action = ["cloudfront:CreateInvalidation"]
+        Sid      = "CloudFrontInvalidation"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
         Resource = "*"
       },
       {
