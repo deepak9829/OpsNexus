@@ -161,7 +161,7 @@ jobs:
             -out=tfplan.binary \
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt
-          EXIT_CODE=$?
+          EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
           if [ $EXIT_CODE -eq 0 ]; then
