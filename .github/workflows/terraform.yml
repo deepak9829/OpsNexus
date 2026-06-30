@@ -72,13 +72,13 @@ jobs:
 
             ENVS="[]"
             if echo "$CHANGED" | grep -qE "^terraform/environments/dev/|^terraform/modules/|^\.github/workflows/terraform\.yml"; then
-              ENVS=$(echo "$ENVS" | jq '. + ["dev"]')
+              ENVS=$(echo "$ENVS" | jq -c '. + ["dev"]')
             fi
             if echo "$CHANGED" | grep -q "^terraform/environments/staging/"; then
-              ENVS=$(echo "$ENVS" | jq '. + ["staging"]')
+              ENVS=$(echo "$ENVS" | jq -c '. + ["staging"]')
             fi
             if echo "$CHANGED" | grep -q "^terraform/environments/prod/"; then
-              ENVS=$(echo "$ENVS" | jq '. + ["prod"]')
+              ENVS=$(echo "$ENVS" | jq -c '. + ["prod"]')
             fi
             # Default to dev if nothing matched (e.g. workflow file only)
             if [ "$ENVS" = "[]" ]; then
