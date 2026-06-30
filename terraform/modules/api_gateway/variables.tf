@@ -33,3 +33,13 @@ variable "traefik_node_port" {
   description = "NodePort on EKS nodes where Traefik HTTP is exposed"
   default     = 30080
 }
+
+variable "regional_certificate_arn" {
+  type        = string
+  description = "ACM regional certificate ARN — attached to NLB TLS listener and API Gateway custom domain"
+}
+
+variable "domain_name" {
+  type        = string
+  description = "Base domain (e.g. opsnexus.site) — API custom domain is api.{env.}domain_name"
+}

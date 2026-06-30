@@ -119,8 +119,6 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: ${{ needs.resolve.outputs.tf_dir }}
-        env:
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
         run: |
           set +e
           terraform plan \

@@ -85,6 +85,19 @@ resource "aws_iam_role_policy" "lambda_kms" {
   })
 }
 
+resource "aws_iam_role_policy" "lambda_secrets" {
+  name = "secrets-manager-read"
+  role = aws_iam_role.lambda.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = var.jwt_secret_arn
+    }]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.project_name}-${var.environment}-api-authorizer"
   retention_in_days = 14
@@ -108,8 +121,8 @@ resource "aws_lambda_function" "authorizer" {
 
   environment {
     variables = {
-      JWT_SECRET  = var.jwt_secret
-      ENVIRONMENT = var.environment
+      JWT_SECRET_ARN = var.jwt_secret_arn
+      ENVIRONMENT    = var.environment
     }
   }
 
