@@ -1,0 +1,860 @@
+openapi: 3.0.3
+info:
+  title: OpsNexus Notification & Audit Service
+  version: 1.0.0
+  description: |
+    Handles multi-channel notification delivery (in-app, email, SMS) and immutable
+    audit event recording for the OpsNexus multi-tenant platform.
+
+    Internal service-to-service calls (POST /notifications, POST /audit-events) should
+    use a service-account JWT with the `internal_service` claim.
+
+servers:
+  - url: http://localhost:8085
+    description: Local development
+  - url: https://api.opsnexus.io/notifications
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Notifications
+    description: User notification delivery and management
+  - name: Audit Events
+    description: Immutable audit trail for all platform actions
+
+paths:
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: List notifications for the current user
+      description: Returns the authenticated user's notifications, newest first. Filterable by read status and channel.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: read
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filter by read status (true=read, false=unread)
+        - name: channel
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [in_app, email, sms]
+          description: Filter by notification channel
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [info, warning, error, success]
+          description: Filter by notification type
+      responses:
+        '200':
+          description: Paginated notification list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "notif_01hx9q2k3m4n5p6r7s8t0010"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    userId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    type: warning
+                    title: "SLA Breach Imminent"
+                    body: "Case CASE-2024-00142 will breach its SLA in 30 minutes."
+                    channel: in_app
+                    read: false
+                    readAt: null
+                    metadata:
+                      caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                      caseNumber: "CASE-2024-00142"
+                      slaMinutesRemaining: 30
+                    createdAt: "2024-01-15T13:30:00Z"
+                  - id: "notif_01hx9q2k3m4n5p6r7s8t0011"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    userId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    type: success
+                    title: "Case Resolved"
+                    body: "Case CASE-2024-00138 has been resolved."
+                    channel: in_app
+                    read: true
+                    readAt: "2024-01-15T09:45:00Z"
+                    metadata:
+                      caseId: "case_01hx9q2k3m4n5p6r7s8t0000"
+                    createdAt: "2024-01-15T09:40:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 47
+                  totalPages: 3
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Notifications]
+      operationId: sendNotification
+      summary: Send a notification (internal service call)
+      description: |
+        Creates and dispatches one or more notifications. This endpoint is intended
+        for internal service-to-service calls (e.g., from workflow-service when a case
+        is assigned). Requires a service-account JWT with the `internal_service` claim.
+        Either `userId` (single recipient) or `userIds` (multiple recipients) must be supplied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+            example:
+              tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+              userIds:
+                - "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+              type: warning
+              title: "SLA Breach Imminent"
+              body: "Case CASE-2024-00142 will breach its SLA in 30 minutes."
+              channel: in_app
+              metadata:
+                caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                caseNumber: "CASE-2024-00142"
+                slaMinutesRemaining: 30
+      responses:
+        '201':
+          description: Notification(s) enqueued for delivery
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      notificationIds:
+                        type: array
+                        items:
+                          type: string
+                        description: IDs of the created notifications
+                        example: ["notif_01hx9q2k3m4n5p6r7s8t0010"]
+                      dispatched:
+                        type: integer
+                        description: Number of notifications dispatched
+                        example: 1
+              example:
+                data:
+                  notificationIds: ["notif_01hx9q2k3m4n5p6r7s8t0010"]
+                  dispatched: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationIdPath'
+
+    put:
+      tags: [Notifications]
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      description: Sets `read=true` and records `readAt` timestamp. Only the owning user may mark their own notifications.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Notification marked as read
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Notification'
+              example:
+                data:
+                  id: "notif_01hx9q2k3m4n5p6r7s8t0010"
+                  read: true
+                  readAt: "2024-01-15T13:35:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/read-all:
+    put:
+      tags: [Notifications]
+      operationId: markAllNotificationsRead
+      summary: Mark all notifications as read
+      description: Marks all unread in-app notifications for the authenticated user as read.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: All notifications marked as read
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      updatedCount:
+                        type: integer
+                        description: Number of notifications marked as read
+                        example: 12
+              example:
+                data:
+                  updatedCount: 12
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notifications/{notificationId}:
+    parameters:
+      - $ref: '#/components/parameters/NotificationIdPath'
+
+    delete:
+      tags: [Notifications]
+      operationId: dismissNotification
+      summary: Dismiss (delete) a notification
+      description: Permanently removes a notification. Only the owning user may dismiss their own notifications.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '204':
+          description: Notification dismissed
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/audit-events:
+    get:
+      tags: [Audit Events]
+      operationId: queryAuditEvents
+      summary: Query audit events (admin only)
+      description: |
+        Returns a paginated, filterable audit trail for the tenant. Supports filtering
+        by actor, resource type, resource ID, and time range. Requires `admin` role.
+        Results are always ordered newest-first.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: actorId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter events by the user who performed the action
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by action string (prefix match, e.g. `case.` matches all case events)
+          example: "case.created"
+        - name: resource
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by resource type
+          example: cases
+        - name: resourceId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter events for a specific resource instance
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Start of time range (inclusive, ISO 8601)
+          example: "2024-01-01T00:00:00Z"
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: End of time range (inclusive, ISO 8601)
+          example: "2024-01-31T23:59:59Z"
+      responses:
+        '200':
+          description: Paginated audit event list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEvent'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "audit_01hx9q2k3m4n5p6r7s8t0020"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    actorId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    actorEmail: "jane.doe@acme.com"
+                    action: "case.status_changed"
+                    resource: cases
+                    resourceId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    oldValue:
+                      status: in_progress
+                    newValue:
+                      status: resolved
+                    ipAddress: "203.0.113.42"
+                    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+                    timestamp: "2024-01-16T09:00:00Z"
+                  - id: "audit_01hx9q2k3m4n5p6r7s8t0019"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    actorId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    actorEmail: "jane.doe@acme.com"
+                    action: "case.assigned"
+                    resource: cases
+                    resourceId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    oldValue:
+                      assigneeId: null
+                    newValue:
+                      assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    ipAddress: "203.0.113.42"
+                    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+                    timestamp: "2024-01-15T11:00:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 1284
+                  totalPages: 65
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Audit Events]
+      operationId: recordAuditEvent
+      summary: Record an audit event (internal service call)
+      description: |
+        Appends an immutable audit event to the tenant's audit trail. This endpoint is
+        intended exclusively for internal service-to-service calls. Requires a
+        service-account JWT with the `internal_service` claim.
+        Audit events cannot be modified or deleted after creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEventRequest'
+            example:
+              tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+              actorId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+              action: "case.status_changed"
+              resource: cases
+              resourceId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+              oldValue:
+                status: in_progress
+              newValue:
+                status: resolved
+      responses:
+        '201':
+          description: Audit event recorded
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditEvent'
+              example:
+                data:
+                  id: "audit_01hx9q2k3m4n5p6r7s8t0020"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  actorId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  actorEmail: "jane.doe@acme.com"
+                  action: "case.status_changed"
+                  resource: cases
+                  resourceId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                  oldValue:
+                    status: in_progress
+                  newValue:
+                    status: resolved
+                  ipAddress: "203.0.113.42"
+                  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+                  timestamp: "2024-01-16T09:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/audit-events/{eventId}:
+    parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Audit event identifier
+        example: "audit_01hx9q2k3m4n5p6r7s8t0020"
+
+    get:
+      tags: [Audit Events]
+      operationId: getAuditEvent
+      summary: Get a specific audit event (admin only)
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Audit event details
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditEvent'
+              example:
+                data:
+                  id: "audit_01hx9q2k3m4n5p6r7s8t0020"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  actorId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  actorEmail: "jane.doe@acme.com"
+                  action: "case.status_changed"
+                  resource: cases
+                  resourceId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                  oldValue:
+                    status: in_progress
+                  newValue:
+                    status: resolved
+                  ipAddress: "203.0.113.42"
+                  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+                  timestamp: "2024-01-16T09:00:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256-signed JWT. Include as `Authorization: Bearer <token>`. Internal service calls must include the `internal_service` claim.
+
+  headers:
+    XRequestId:
+      description: Unique identifier for the request, useful for distributed tracing
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  parameters:
+    XTenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: The tenant context for the request
+      schema:
+        type: string
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    NotificationIdPath:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Notification identifier
+      example: "notif_01hx9q2k3m4n5p6r7s8t0010"
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "Request body is malformed or missing required fields"
+              details: {}
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_UNAUTHORIZED
+              message: "Invalid or expired token"
+              details: {}
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_FORBIDDEN
+              message: "You do not have permission to perform this action"
+              details: {}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: NOT_FOUND
+              message: "The requested resource was not found"
+              details: {}
+    UnprocessableEntity:
+      description: Validation errors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "One or more fields failed validation"
+              details: {}
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: "An unexpected error occurred. Please try again later."
+              details: {}
+
+  schemas:
+    Notification:
+      type: object
+      required: [id, tenantId, userId, type, title, body, channel, read, createdAt]
+      properties:
+        id:
+          type: string
+          example: "notif_01hx9q2k3m4n5p6r7s8t0010"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        userId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        type:
+          type: string
+          enum: [info, warning, error, success]
+          example: warning
+        title:
+          type: string
+          example: "SLA Breach Imminent"
+        body:
+          type: string
+          example: "Case CASE-2024-00142 will breach its SLA in 30 minutes."
+        channel:
+          type: string
+          enum: [in_app, email, sms]
+          example: in_app
+        read:
+          type: boolean
+          example: false
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Optional structured payload associated with the notification (e.g. links to related resources)
+          example:
+            caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+            caseNumber: "CASE-2024-00142"
+            slaMinutesRemaining: 30
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T13:30:00Z"
+
+    SendNotificationRequest:
+      type: object
+      required: [tenantId, type, title, body, channel]
+      description: |
+        Either `userId` (single recipient) or `userIds` (multiple recipients) must be provided.
+        If both are absent the request will be rejected with a 422.
+      properties:
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        userId:
+          type: string
+          description: Single recipient user ID (mutually exclusive with userIds)
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        userIds:
+          type: array
+          items:
+            type: string
+          description: Multiple recipient user IDs (mutually exclusive with userId)
+          example: ["usr_01hx9q2k3m4n5p6r7s8t9u0v", "usr_01hx9q2k3m4n5p6r7s8t9u1aa"]
+        type:
+          type: string
+          enum: [info, warning, error, success]
+          example: warning
+        title:
+          type: string
+          maxLength: 200
+          example: "SLA Breach Imminent"
+        body:
+          type: string
+          maxLength: 2000
+          example: "Case CASE-2024-00142 will breach its SLA in 30 minutes."
+        channel:
+          type: string
+          enum: [in_app, email, sms]
+          example: in_app
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+            slaMinutesRemaining: 30
+
+    AuditEvent:
+      type: object
+      required: [id, tenantId, actorId, actorEmail, action, resource, resourceId, timestamp]
+      properties:
+        id:
+          type: string
+          example: "audit_01hx9q2k3m4n5p6r7s8t0020"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        actorId:
+          type: string
+          description: User ID of the actor who performed the action
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        actorEmail:
+          type: string
+          format: email
+          description: Email of the actor at the time of the event (immutable snapshot)
+          example: "jane.doe@acme.com"
+        action:
+          type: string
+          description: |
+            Dot-separated action string following the pattern `resource.verb`.
+            Examples: `case.created`, `case.status_changed`, `user.login`,
+            `document.uploaded`, `role.assigned`, `tenant.settings_updated`
+          example: "case.status_changed"
+        resource:
+          type: string
+          description: Resource type the action was performed on
+          example: cases
+        resourceId:
+          type: string
+          description: Identifier of the specific resource instance
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        oldValue:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Snapshot of relevant resource fields before the action
+          example:
+            status: in_progress
+        newValue:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Snapshot of relevant resource fields after the action
+          example:
+            status: resolved
+        ipAddress:
+          type: string
+          nullable: true
+          description: IP address of the client that triggered the action
+          example: "203.0.113.42"
+        userAgent:
+          type: string
+          nullable: true
+          description: User-Agent string of the client
+          example: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the action occurred (server-assigned, immutable)
+          example: "2024-01-16T09:00:00Z"
+
+    AuditEventRequest:
+      type: object
+      required: [tenantId, actorId, action, resource, resourceId]
+      properties:
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        actorId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        action:
+          type: string
+          description: Dot-separated action string, e.g. `case.created`
+          example: "case.status_changed"
+        resource:
+          type: string
+          example: cases
+        resourceId:
+          type: string
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        oldValue:
+          type: object
+          nullable: true
+          additionalProperties: true
+          example:
+            status: in_progress
+        newValue:
+          type: object
+          nullable: true
+          additionalProperties: true
+          example:
+            status: resolved
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 1284
+        totalPages:
+          type: integer
+          example: 65
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: AUTH_UNAUTHORIZED
+        message:
+          type: string
+          example: "Invalid or expired token"
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'

@@ -1,0 +1,1045 @@
+openapi: 3.0.3
+info:
+  title: OpsNexus Tenant & Profile Service
+  version: 1.0.0
+  description: |
+    Manages tenant lifecycle (provisioning, settings, deactivation), user profiles,
+    and organizational hierarchy within the OpsNexus multi-tenant platform.
+    Super-admin endpoints require a system-level JWT with the `super_admin` claim.
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+  - url: https://api.opsnexus.io/tenant
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Tenants
+    description: Tenant lifecycle management (super-admin)
+  - name: Tenant Settings
+    description: Per-tenant configuration
+  - name: Tenant Members
+    description: Membership listing within a tenant
+  - name: Profiles
+    description: User profile management
+  - name: Organizations
+    description: Organizational units within a tenant
+
+paths:
+  /api/v1/tenants:
+    get:
+      tags: [Tenants]
+      operationId: listTenants
+      summary: List all tenants (super-admin)
+      description: Returns a paginated list of all tenants on the platform. Requires `super_admin` role.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, suspended]
+          description: Filter tenants by status
+        - name: plan
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [free, pro, enterprise]
+          description: Filter tenants by subscription plan
+      responses:
+        '200':
+          description: Paginated tenant list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tenant'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    name: Acme Corp
+                    slug: acme-corp
+                    plan: enterprise
+                    status: active
+                    settings:
+                      maxUsers: 500
+                      allowedDomains: ["acme.com"]
+                      features:
+                        sso: true
+                        advancedReporting: true
+                      notificationPreferences:
+                        emailEnabled: true
+                        smsEnabled: false
+                    createdAt: "2023-06-01T00:00:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 87
+                  totalPages: 5
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Tenants]
+      operationId: createTenant
+      summary: Create a new tenant (super-admin)
+      description: Provisions a new tenant on the platform. Requires `super_admin` role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+            example:
+              name: Globex Corp
+              slug: globex-corp
+              plan: pro
+              settings:
+                maxUsers: 50
+                allowedDomains: ["globex.com"]
+                features:
+                  sso: false
+                  advancedReporting: true
+                notificationPreferences:
+                  emailEnabled: true
+                  smsEnabled: false
+      responses:
+        '201':
+          description: Tenant created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+              example:
+                data:
+                  id: "tenant_01hzaabc1234567890abcdef"
+                  name: Globex Corp
+                  slug: globex-corp
+                  plan: pro
+                  status: active
+                  settings:
+                    maxUsers: 50
+                    allowedDomains: ["globex.com"]
+                    features:
+                      sso: false
+                      advancedReporting: true
+                    notificationPreferences:
+                      emailEnabled: true
+                      smsEnabled: false
+                  createdAt: "2024-03-10T09:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Slug already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: TENANT_SLUG_CONFLICT
+                  message: "A tenant with this slug already exists"
+                  details:
+                    slug: globex-corp
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tenants/{tenantId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdPath'
+
+    get:
+      tags: [Tenants]
+      operationId: getTenant
+      summary: Get tenant by ID
+      description: Returns tenant details. Accessible by super-admins or tenant admins of the specified tenant.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Tenant details
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Tenants]
+      operationId: updateTenant
+      summary: Update tenant details
+      description: Updates mutable tenant fields such as name and plan. Requires `super_admin` or tenant `admin`.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantRequest'
+            example:
+              name: Globex Corporation
+              plan: enterprise
+      responses:
+        '200':
+          description: Tenant updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Tenants]
+      operationId: deactivateTenant
+      summary: Deactivate a tenant (super-admin)
+      description: Sets tenant status to `inactive`. This is a soft delete — data is retained. Requires `super_admin`.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '204':
+          description: Tenant deactivated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tenants/{tenantId}/settings:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdPath'
+      - $ref: '#/components/parameters/XTenantId'
+
+    get:
+      tags: [Tenant Settings]
+      operationId: getTenantSettings
+      summary: Get tenant settings
+      responses:
+        '200':
+          description: Tenant settings
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TenantSettings'
+              example:
+                data:
+                  maxUsers: 500
+                  allowedDomains: ["acme.com", "acme.co.uk"]
+                  features:
+                    sso: true
+                    advancedReporting: true
+                    apiAccess: true
+                  notificationPreferences:
+                    emailEnabled: true
+                    smsEnabled: false
+                    slackWebhookUrl: "https://hooks.slack.com/services/T00000/B00000/XXXX"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Tenant Settings]
+      operationId: updateTenantSettings
+      summary: Update tenant settings
+      description: Performs a partial update (merge patch) on tenant settings. Requires tenant `admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantSettings'
+            example:
+              allowedDomains: ["acme.com", "acme.co.uk", "acme.de"]
+              notificationPreferences:
+                slackWebhookUrl: "https://hooks.slack.com/services/T00000/B00000/NEWURL"
+      responses:
+        '200':
+          description: Settings updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TenantSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tenants/{tenantId}/members:
+    parameters:
+      - $ref: '#/components/parameters/TenantIdPath'
+      - $ref: '#/components/parameters/XTenantId'
+
+    get:
+      tags: [Tenant Members]
+      operationId: listTenantMembers
+      summary: List members of a tenant
+      description: Returns all users that belong to the specified tenant. Requires `admin` role within that tenant.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, suspended]
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Full-text search on name or email
+          example: "jane"
+      responses:
+        '200':
+          description: Tenant member list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenantMember'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - userId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    email: jane.doe@acme.com
+                    firstName: Jane
+                    lastName: Doe
+                    status: active
+                    roles: [operator]
+                    joinedAt: "2024-01-15T10:30:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 34
+                  totalPages: 2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/profiles/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: User identifier
+        example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+
+    get:
+      tags: [Profiles]
+      operationId: getUserProfile
+      summary: Get a user's extended profile
+      description: Returns the extended profile (timezone, locale, avatar, metadata) for a user. Users can view their own profile; admins can view any profile within the tenant.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: User profile
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/UserProfile'
+              example:
+                data:
+                  userId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  organizationId: "org_01hzaabc1234567890abcdef"
+                  displayName: Jane Doe
+                  avatarUrl: "https://cdn.opsnexus.io/avatars/usr_01hx9q2k3m4n5p6r7s8t9u0v.png"
+                  timezone: "America/New_York"
+                  locale: en-US
+                  metadata:
+                    department: "IT Operations"
+                    jobTitle: "Senior SRE"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Profiles]
+      operationId: updateUserProfile
+      summary: Update a user's profile
+      description: Updates extended profile fields. Users can update their own; admins can update any user's profile within the tenant.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserProfileRequest'
+            example:
+              displayName: Jane Smith
+              timezone: "America/Chicago"
+              locale: en-US
+              metadata:
+                department: "Platform Engineering"
+                jobTitle: "Staff SRE"
+      responses:
+        '200':
+          description: Profile updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: List organizations for the current tenant
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: parentId
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+          description: Filter by parent organization (omit for root organizations)
+      responses:
+        '200':
+          description: Organization list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Organization'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "org_01hzaabc1234567890abcdef"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    name: Engineering
+                    type: department
+                    parentId: null
+                    metadata:
+                      costCenter: "CC-ENG-001"
+                      headcount: 120
+                  - id: "org_01hzaabc1234567890000001"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    name: Platform Team
+                    type: team
+                    parentId: "org_01hzaabc1234567890abcdef"
+                    metadata:
+                      costCenter: "CC-PLT-002"
+                      headcount: 18
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 8
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Create a new organization unit
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrganizationRequest'
+            example:
+              name: "Security Operations"
+              type: team
+              parentId: "org_01hzaabc1234567890abcdef"
+              metadata:
+                costCenter: "CC-SEC-003"
+      responses:
+        '201':
+          description: Organization created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Parent organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: "Parent organization not found"
+                  details:
+                    parentId: "org_01hzaabc1234567890abcdef"
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256-signed JWT. Include as `Authorization: Bearer <token>`.
+
+  headers:
+    XRequestId:
+      description: Unique identifier for the request, useful for distributed tracing
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  parameters:
+    XTenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: The tenant context for the request
+      schema:
+        type: string
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    TenantIdPath:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Tenant identifier
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number (1-based)
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Number of results per page (max 100)
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "Request body is malformed or missing required fields"
+              details: {}
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_UNAUTHORIZED
+              message: "Invalid or expired token"
+              details: {}
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_FORBIDDEN
+              message: "You do not have permission to perform this action"
+              details: {}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: NOT_FOUND
+              message: "The requested resource was not found"
+              details: {}
+    UnprocessableEntity:
+      description: Validation errors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "One or more fields failed validation"
+              details:
+                fields:
+                  - field: slug
+                    issue: "must contain only lowercase letters, numbers, and hyphens"
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: "An unexpected error occurred. Please try again later."
+              details: {}
+
+  schemas:
+    Tenant:
+      type: object
+      required: [id, name, slug, plan, status, settings, createdAt]
+      properties:
+        id:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        name:
+          type: string
+          example: Acme Corp
+        slug:
+          type: string
+          description: URL-safe unique identifier
+          pattern: '^[a-z0-9-]+$'
+          example: acme-corp
+        plan:
+          type: string
+          enum: [free, pro, enterprise]
+          example: enterprise
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: active
+        settings:
+          $ref: '#/components/schemas/TenantSettings'
+        createdAt:
+          type: string
+          format: date-time
+          example: "2023-06-01T00:00:00Z"
+
+    TenantSettings:
+      type: object
+      properties:
+        maxUsers:
+          type: integer
+          description: Maximum number of users allowed for this tenant
+          example: 500
+        allowedDomains:
+          type: array
+          items:
+            type: string
+          description: Email domains permitted to register under this tenant
+          example: ["acme.com", "acme.co.uk"]
+        features:
+          type: object
+          description: Feature flags enabled for this tenant
+          additionalProperties: true
+          example:
+            sso: true
+            advancedReporting: true
+            apiAccess: true
+        notificationPreferences:
+          type: object
+          description: Tenant-wide notification channel settings
+          properties:
+            emailEnabled:
+              type: boolean
+              example: true
+            smsEnabled:
+              type: boolean
+              example: false
+            slackWebhookUrl:
+              type: string
+              nullable: true
+              example: "https://hooks.slack.com/services/T00000/B00000/XXXX"
+
+    CreateTenantRequest:
+      type: object
+      required: [name, slug, plan]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          example: Globex Corp
+        slug:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          minLength: 2
+          maxLength: 64
+          example: globex-corp
+        plan:
+          type: string
+          enum: [free, pro, enterprise]
+          example: pro
+        settings:
+          $ref: '#/components/schemas/TenantSettings'
+
+    UpdateTenantRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          example: Globex Corporation
+        plan:
+          type: string
+          enum: [free, pro, enterprise]
+          example: enterprise
+
+    TenantMember:
+      type: object
+      required: [userId, email, firstName, lastName, status, roles, joinedAt]
+      properties:
+        userId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        email:
+          type: string
+          format: email
+          example: jane.doe@acme.com
+        firstName:
+          type: string
+          example: Jane
+        lastName:
+          type: string
+          example: Doe
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: active
+        roles:
+          type: array
+          items:
+            type: string
+          example: [operator]
+        joinedAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    Organization:
+      type: object
+      required: [id, tenantId, name, type, metadata]
+      properties:
+        id:
+          type: string
+          example: "org_01hzaabc1234567890abcdef"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        name:
+          type: string
+          example: Engineering
+        type:
+          type: string
+          description: Organizational unit type (e.g. business-unit, department, team, squad)
+          example: department
+        parentId:
+          type: string
+          nullable: true
+          description: Parent organization ID, or null if this is a root organization
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            costCenter: "CC-ENG-001"
+            headcount: 120
+
+    CreateOrganizationRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: "Security Operations"
+        type:
+          type: string
+          example: team
+        parentId:
+          type: string
+          nullable: true
+          example: "org_01hzaabc1234567890abcdef"
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            costCenter: "CC-SEC-003"
+
+    UserProfile:
+      type: object
+      required: [userId, tenantId, displayName]
+      properties:
+        userId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        organizationId:
+          type: string
+          nullable: true
+          example: "org_01hzaabc1234567890abcdef"
+        displayName:
+          type: string
+          example: Jane Doe
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://cdn.opsnexus.io/avatars/usr_01hx9q2k3m4n5p6r7s8t9u0v.png"
+        timezone:
+          type: string
+          description: IANA timezone string
+          example: "America/New_York"
+        locale:
+          type: string
+          description: BCP 47 locale code
+          example: en-US
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            department: "IT Operations"
+            jobTitle: "Senior SRE"
+
+    UpdateUserProfileRequest:
+      type: object
+      properties:
+        organizationId:
+          type: string
+          nullable: true
+          example: "org_01hzaabc1234567890abcdef"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Jane Smith
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://cdn.opsnexus.io/avatars/new.png"
+        timezone:
+          type: string
+          example: "America/Chicago"
+        locale:
+          type: string
+          example: en-US
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 87
+        totalPages:
+          type: integer
+          example: 5
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: "The requested resource was not found"
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'

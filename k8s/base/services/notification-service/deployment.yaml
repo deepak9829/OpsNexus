@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: opsnexus
+  labels:
+    app: notification-service
+    component: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+        component: service
+    spec:
+      initContainers:
+        - name: wait-for-localstack
+          image: busybox:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for LocalStack to be ready..."
+              until nc -z localstack 4566; do
+                echo "LocalStack not ready yet, sleeping 2s..."
+                sleep 2
+              done
+              echo "LocalStack is ready."
+      containers:
+        - name: notification-service
+          image: opsnexus-notification-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8085
+              protocol: TCP
+          env:
+            - name: NOTIFICATION_SERVICE_PORT
+              value: "8085"
+            - name: AWS_ENDPOINT_URL
+              value: http://localstack:4566
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: opsnexus-secrets
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opsnexus-secrets
+                  key: aws-secret-access-key
+            - name: DYNAMODB_NOTIFICATIONS_TABLE
+              value: notifications
+            - name: DYNAMODB_AUDIT_TABLE
+              value: audit_events
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8085
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

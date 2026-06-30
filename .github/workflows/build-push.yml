@@ -1,0 +1,159 @@
+name: Build & Push Images
+
+on:
+  push:
+    branches: [develop, staging, main]
+    paths:
+      - 'services/**'
+      - '.github/workflows/build-push.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      services:
+        description: 'Comma-separated services (or "all")'
+        required: false
+        default: 'all'
+
+concurrency:
+  group: build-${{ github.ref }}-${{ matrix.service }}
+  cancel-in-progress: true
+
+env:
+  ECR_REGISTRY_ALIAS: 'opsnexus'
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+      aws_account_id: ${{ steps.resolve.outputs.aws_account_id }}
+    steps:
+      - name: Resolve branch to environment
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+          case "${ENV}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+            *)       REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
+
+          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.resolve.outputs.aws_region }}
+          role-session-name: GHAResolve-${{ github.run_id }}
+
+      - name: Get AWS account ID
+        id: account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "aws_account_id=${ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
+
+  build-push:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - auth-service
+          - tenant-service
+          - workflow-service
+          - document-service
+          - notification-service
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHABuild-${{ matrix.service }}-${{ github.run_id }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:latest
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_BASE="${ECR_REGISTRY}/opsnexus/${{ matrix.service }}"
+          echo "image_base=${IMAGE_BASE}" >> "$GITHUB_OUTPUT"
+          echo "image_sha=${IMAGE_BASE}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${IMAGE_BASE}:latest" >> "$GITHUB_OUTPUT"
+          echo "image_env=${IMAGE_BASE}:${{ needs.resolve.outputs.environment }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_sha }}
+            ${{ steps.meta.outputs.image_latest }}
+            ${{ steps.meta.outputs.image_env }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.image_sha }}
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}
+        continue-on-error: true
+
+      - name: Output image URI
+        run: echo "Pushed ${{ steps.meta.outputs.image_sha }}"

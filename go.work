@@ -1,0 +1,9 @@
+go 1.22
+
+use (
+	./services/auth-service
+	./services/tenant-service
+	./services/workflow-service
+	./services/document-service
+	./services/notification-service
+)

@@ -1,0 +1,146 @@
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+
+env:
+  TF_VERSION: '1.10.0'
+  STATE_BUCKET_REGION: 'ap-southeast-1'
+  STATE_BUCKET: 'opsnexus-tf-state'
+  TF_INPUT: false
+
+jobs:
+  validate:
+    name: Validate confirmation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation word
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "destroy" ]; then
+            echo "ERROR: Confirmation text must be exactly 'destroy'. Got: '${{ github.event.inputs.confirm }}'"
+            exit 1
+          fi
+          echo "Confirmation accepted. Proceeding to plan destroy for: ${{ github.event.inputs.environment }}"
+
+  resolve:
+    name: Resolve region
+    runs-on: ubuntu-latest
+    needs: validate
+    outputs:
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+    steps:
+      - name: Resolve environment to AWS region
+        id: resolve
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          case "${ENV}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+            *)       REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
+
+  plan-destroy:
+    name: Plan Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [validate, resolve]
+    environment: ${{ github.event.inputs.environment }}-plan
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHADestroyPlan-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="../../../terraform/backends/${{ github.event.inputs.environment }}.hcl" \
+            -reconfigure
+
+      - name: Terraform Plan Destroy
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        env:
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        run: |
+          terraform plan -destroy \
+            -var-file="${{ github.event.inputs.environment }}.tfvars" \
+            -out=destroy-plan.binary \
+            -no-color 2>&1 | tee destroy-plan-output.txt
+
+          terraform show -json destroy-plan.binary > destroy-plan.json
+
+      - name: Upload destroy plan to S3
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          aws s3 cp destroy-plan.binary \
+            s3://${{ env.STATE_BUCKET }}/destroy-plans/${{ github.event.inputs.environment }}/run-${{ github.run_id }}.tfplan
+
+  destroy:
+    name: Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [resolve, plan-destroy]
+    environment: ${{ github.event.inputs.environment }}-destroy
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHADestroy-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="../../../terraform/backends/${{ github.event.inputs.environment }}.hcl" \
+            -reconfigure
+
+      - name: Download destroy plan from S3
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          aws s3 cp \
+            s3://${{ env.STATE_BUCKET }}/destroy-plans/${{ github.event.inputs.environment }}/run-${{ github.run_id }}.tfplan \
+            destroy-plan.binary
+
+      - name: Terraform Destroy
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          terraform apply -auto-approve destroy-plan.binary
+          echo "Destroy complete for environment: ${{ github.event.inputs.environment }}"

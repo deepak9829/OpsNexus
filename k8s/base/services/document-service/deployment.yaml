@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-service
+  namespace: opsnexus
+  labels:
+    app: document-service
+    component: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: document-service
+  template:
+    metadata:
+      labels:
+        app: document-service
+        component: service
+    spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MongoDB to be ready..."
+              until nc -z mongodb 27017; do
+                echo "MongoDB not ready yet, sleeping 2s..."
+                sleep 2
+              done
+              echo "MongoDB is ready."
+      containers:
+        - name: document-service
+          image: opsnexus-document-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8084
+              protocol: TCP
+          env:
+            - name: DOCUMENT_SERVICE_PORT
+              value: "8084"
+            - name: MONGO_URI
+              value: mongodb://mongodb:27017
+            - name: MONGO_DB_NAME
+              value: documents_db
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

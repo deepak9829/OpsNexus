@@ -1,0 +1,1072 @@
+openapi: 3.0.3
+info:
+  title: OpsNexus Document & Form Service
+  version: 1.0.0
+  description: |
+    Manages form template definitions, form submissions, document uploads, versioning,
+    and document lifecycle for the OpsNexus multi-tenant platform. Documents are stored
+    in object storage (e.g. S3); this service manages metadata and pre-signed URL generation.
+
+servers:
+  - url: http://localhost:8084
+    description: Local development
+  - url: https://api.opsnexus.io/documents
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Form Templates
+    description: Dynamic form template management
+  - name: Form Submissions
+    description: Submitted form data lifecycle
+  - name: Documents
+    description: File upload, retrieval, and versioning
+
+paths:
+  /api/v1/forms:
+    get:
+      tags: [Form Templates]
+      operationId: listFormTemplates
+      summary: List form templates
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, published, archived]
+          description: Filter by template status
+      responses:
+        '200':
+          description: Paginated list of form templates
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FormTemplate'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "form_01hx9q2k3m4n5p6r7s8t0001"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    name: "Incident Intake Form"
+                    description: "Collect initial details for a new incident report."
+                    version: 3
+                    fields:
+                      - name: summary
+                        type: text
+                        label: "Incident Summary"
+                        required: true
+                        validation:
+                          maxLength: 500
+                      - name: severity
+                        type: select
+                        label: "Severity"
+                        required: true
+                        validation:
+                          options: [sev1, sev2, sev3, sev4]
+                      - name: affectedSystems
+                        type: multiselect
+                        label: "Affected Systems"
+                        required: false
+                        validation:
+                          options: [api-gateway, auth-service, database, cdn]
+                      - name: attachEvidence
+                        type: file
+                        label: "Attach Evidence"
+                        required: false
+                        validation:
+                          maxSizeMb: 10
+                          allowedMimeTypes: ["image/png", "image/jpeg", "application/pdf"]
+                    status: published
+                    createdAt: "2024-01-01T00:00:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 7
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Form Templates]
+      operationId: createFormTemplate
+      summary: Create a new form template
+      description: Creates a new form template in `draft` status. Requires `admin` or `operator` role.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFormTemplateRequest'
+            example:
+              name: "Change Request Form"
+              description: "Standard change request for infrastructure modifications."
+              fields:
+                - name: changeTitle
+                  type: text
+                  label: "Change Title"
+                  required: true
+                  validation:
+                    maxLength: 200
+                - name: impactDescription
+                  type: textarea
+                  label: "Impact Description"
+                  required: true
+                  validation:
+                    maxLength: 5000
+                - name: scheduledDate
+                  type: date
+                  label: "Scheduled Date"
+                  required: true
+                  validation: {}
+                - name: riskLevel
+                  type: select
+                  label: "Risk Level"
+                  required: true
+                  validation:
+                    options: [low, medium, high]
+      responses:
+        '201':
+          description: Form template created in draft status
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FormTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/forms/{formId}:
+    parameters:
+      - name: formId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "form_01hx9q2k3m4n5p6r7s8t0001"
+
+    get:
+      tags: [Form Templates]
+      operationId: getFormTemplate
+      summary: Get a form template by ID
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Form template details
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FormTemplate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Form Templates]
+      operationId: updateFormTemplate
+      summary: Update a form template
+      description: |
+        Updates a form template. If the template is `published`, updating fields
+        will auto-increment the version and create a new snapshot. Status can be
+        transitioned: draft→published, published→archived.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFormTemplateRequest'
+            example:
+              status: published
+              description: "Standard change request for infrastructure modifications. (Updated)"
+      responses:
+        '200':
+          description: Form template updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FormTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/submissions:
+    get:
+      tags: [Form Submissions]
+      operationId: listSubmissions
+      summary: List form submissions
+      description: Returns submissions for the tenant, filterable by form template and status.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: formId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter submissions for a specific form template
+          example: "form_01hx9q2k3m4n5p6r7s8t0001"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [submitted, processing, approved, rejected]
+          description: Filter by submission status
+        - name: submittedBy
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter submissions by the user who submitted them
+      responses:
+        '200':
+          description: Paginated list of submissions
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FormSubmission'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "sub_01hx9q2k3m4n5p6r7s8t0002"
+                    formId: "form_01hx9q2k3m4n5p6r7s8t0001"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    submittedBy: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    data:
+                      summary: "API gateway 502 errors spiking on us-east-1"
+                      severity: sev2
+                      affectedSystems: [api-gateway]
+                    status: submitted
+                    createdAt: "2024-01-15T10:35:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 24
+                  totalPages: 2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Form Submissions]
+      operationId: submitForm
+      summary: Submit a filled form
+      description: Records a completed form submission. The `data` object must match the field definitions of the referenced form template.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFormSubmissionRequest'
+            example:
+              formId: "form_01hx9q2k3m4n5p6r7s8t0001"
+              data:
+                summary: "API gateway 502 errors spiking on us-east-1"
+                severity: sev2
+                affectedSystems: [api-gateway]
+      responses:
+        '201':
+          description: Form submitted successfully
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FormSubmission'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Form template not found or not published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: FORM_NOT_FOUND_OR_UNPUBLISHED
+                  message: "The referenced form template does not exist or is not published"
+                  details:
+                    formId: "form_01hx9q2k3m4n5p6r7s8t0001"
+        '422':
+          description: Submission data fails form validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: FORM_VALIDATION_ERROR
+                  message: "Submission data failed form field validation"
+                  details:
+                    fields:
+                      - field: summary
+                        issue: "Required field is missing"
+                      - field: severity
+                        issue: "Must be one of: sev1, sev2, sev3, sev4"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/submissions/{submissionId}:
+    parameters:
+      - name: submissionId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "sub_01hx9q2k3m4n5p6r7s8t0002"
+
+    get:
+      tags: [Form Submissions]
+      operationId: getSubmission
+      summary: Get a form submission by ID
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Form submission details
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FormSubmission'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/upload:
+    post:
+      tags: [Documents]
+      operationId: uploadDocument
+      summary: Upload a document
+      description: |
+        Accepts a multipart/form-data upload. The file is stored in object storage
+        and metadata is persisted. Returns the document metadata including a
+        pre-signed download URL valid for 1 hour.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file to upload (max 100 MB)
+                caseId:
+                  type: string
+                  nullable: true
+                  description: Associate this document with a case
+                  example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                description:
+                  type: string
+                  maxLength: 500
+                  description: Optional description for the document
+                  example: "Network trace captured during the incident window"
+      responses:
+        '201':
+          description: Document uploaded successfully
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+              example:
+                data:
+                  id: "doc_01hx9q2k3m4n5p6r7s8t0003"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  filename: "network-trace-2024-01-15.pcap"
+                  mimeType: "application/octet-stream"
+                  sizeBytes: 2097152
+                  storageKey: "tenants/tenant_01hx9q2k3m4n5p6r7s8t9u0v/docs/doc_01hx9q2k3m4n5p6r7s8t0003/v1"
+                  uploadedBy: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                  versionCount: 1
+                  currentVersion: 1
+                  downloadUrl: "https://storage.opsnexus.io/presigned/...?expires=3600"
+                  createdAt: "2024-01-15T11:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          description: File too large (max 100 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: FILE_TOO_LARGE
+                  message: "File exceeds the maximum allowed size of 100 MB"
+                  details:
+                    maxSizeBytes: 104857600
+        '415':
+          description: Unsupported media type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: UNSUPPORTED_MEDIA_TYPE
+                  message: "The uploaded file type is not permitted"
+                  details: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      operationId: listDocuments
+      summary: List documents for tenant
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: caseId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter documents associated with a specific case
+        - name: uploadedBy
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by uploader user ID
+        - name: mimeType
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by MIME type (partial match)
+          example: "application/pdf"
+      responses:
+        '200':
+          description: Paginated document list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/{documentId}:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "doc_01hx9q2k3m4n5p6r7s8t0003"
+
+    get:
+      tags: [Documents]
+      operationId: getDocument
+      summary: Get document metadata
+      description: Returns document metadata and a pre-signed download URL valid for 1 hour.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Document metadata with download URL
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Documents]
+      operationId: deleteDocument
+      summary: Delete a document
+      description: Soft-deletes the document record and schedules the object storage file for deletion. Requires `admin` or the original uploader.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '204':
+          description: Document deleted
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/documents/{documentId}/versions:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "doc_01hx9q2k3m4n5p6r7s8t0003"
+
+    get:
+      tags: [Documents]
+      operationId: listDocumentVersions
+      summary: List all versions of a document
+      description: Returns the version history for a document, ordered from newest to oldest.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Document version list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocumentVersion'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "docver_01hx9q2k3m4n5p6r7s8t0004"
+                    documentId: "doc_01hx9q2k3m4n5p6r7s8t0003"
+                    version: 2
+                    storageKey: "tenants/tenant_01hx9q2k3m4n5p6r7s8t9u0v/docs/doc_01hx9q2k3m4n5p6r7s8t0003/v2"
+                    uploadedBy: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    createdAt: "2024-01-16T08:30:00Z"
+                  - id: "docver_01hx9q2k3m4n5p6r7s8t0005"
+                    documentId: "doc_01hx9q2k3m4n5p6r7s8t0003"
+                    version: 1
+                    storageKey: "tenants/tenant_01hx9q2k3m4n5p6r7s8t9u0v/docs/doc_01hx9q2k3m4n5p6r7s8t0003/v1"
+                    uploadedBy: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    createdAt: "2024-01-15T11:00:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 2
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256-signed JWT. Include as `Authorization: Bearer <token>`.
+
+  headers:
+    XRequestId:
+      description: Unique identifier for the request, useful for distributed tracing
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  parameters:
+    XTenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: The tenant context for the request
+      schema:
+        type: string
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "Request body is malformed or missing required fields"
+              details: {}
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_UNAUTHORIZED
+              message: "Invalid or expired token"
+              details: {}
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_FORBIDDEN
+              message: "You do not have permission to perform this action"
+              details: {}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: NOT_FOUND
+              message: "The requested resource was not found"
+              details: {}
+    UnprocessableEntity:
+      description: Validation errors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "One or more fields failed validation"
+              details: {}
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: "An unexpected error occurred. Please try again later."
+              details: {}
+
+  schemas:
+    FormTemplate:
+      type: object
+      required: [id, tenantId, name, version, fields, status, createdAt]
+      properties:
+        id:
+          type: string
+          example: "form_01hx9q2k3m4n5p6r7s8t0001"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        name:
+          type: string
+          example: "Incident Intake Form"
+        description:
+          type: string
+          nullable: true
+          example: "Collect initial details for a new incident report."
+        version:
+          type: integer
+          description: Auto-incremented on every field change to a published form
+          example: 3
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormField'
+        status:
+          type: string
+          enum: [draft, published, archived]
+          example: published
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+
+    FormField:
+      type: object
+      required: [name, type, label, required]
+      properties:
+        name:
+          type: string
+          description: Unique field identifier (used as key in submission data)
+          example: summary
+        type:
+          type: string
+          enum: [text, email, number, date, select, multiselect, file, textarea]
+          example: text
+        label:
+          type: string
+          description: Human-readable label shown in the UI
+          example: "Incident Summary"
+        required:
+          type: boolean
+          example: true
+        validation:
+          type: object
+          description: |
+            Field-type-specific validation rules:
+            - text/textarea: maxLength (int), minLength (int), pattern (regex)
+            - number: min (number), max (number)
+            - select/multiselect: options (string[])
+            - file: maxSizeMb (int), allowedMimeTypes (string[])
+          additionalProperties: true
+          example:
+            maxLength: 500
+
+    CreateFormTemplateRequest:
+      type: object
+      required: [name, fields]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+          example: "Change Request Form"
+        description:
+          type: string
+          maxLength: 1000
+          example: "Standard change request for infrastructure modifications."
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FormField'
+
+    UpdateFormTemplateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+          nullable: true
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FormField'
+        status:
+          type: string
+          enum: [draft, published, archived]
+          description: Allowed transitions — draft→published, published→archived
+
+    FormSubmission:
+      type: object
+      required: [id, formId, tenantId, submittedBy, data, status, createdAt]
+      properties:
+        id:
+          type: string
+          example: "sub_01hx9q2k3m4n5p6r7s8t0002"
+        formId:
+          type: string
+          example: "form_01hx9q2k3m4n5p6r7s8t0001"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        submittedBy:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        data:
+          type: object
+          additionalProperties: true
+          description: Key-value map of field name → submitted value
+          example:
+            summary: "API gateway 502 errors spiking on us-east-1"
+            severity: sev2
+            affectedSystems: [api-gateway]
+        status:
+          type: string
+          enum: [submitted, processing, approved, rejected]
+          example: submitted
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:35:00Z"
+
+    CreateFormSubmissionRequest:
+      type: object
+      required: [formId, data]
+      properties:
+        formId:
+          type: string
+          example: "form_01hx9q2k3m4n5p6r7s8t0001"
+        data:
+          type: object
+          additionalProperties: true
+          description: Key-value map of field name → value. Must satisfy field validation rules.
+          example:
+            summary: "API gateway 502 errors spiking on us-east-1"
+            severity: sev2
+            affectedSystems: [api-gateway]
+
+    Document:
+      type: object
+      required: [id, tenantId, filename, mimeType, sizeBytes, storageKey, uploadedBy, versionCount, currentVersion, createdAt]
+      properties:
+        id:
+          type: string
+          example: "doc_01hx9q2k3m4n5p6r7s8t0003"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        filename:
+          type: string
+          example: "network-trace-2024-01-15.pcap"
+        mimeType:
+          type: string
+          example: "application/octet-stream"
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 2097152
+        storageKey:
+          type: string
+          description: Internal object storage path (not exposed externally)
+          example: "tenants/tenant_01hx9q2k3m4n5p6r7s8t9u0v/docs/doc_01hx9q2k3m4n5p6r7s8t0003/v1"
+        uploadedBy:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        caseId:
+          type: string
+          nullable: true
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        versionCount:
+          type: integer
+          example: 1
+        currentVersion:
+          type: integer
+          example: 1
+        downloadUrl:
+          type: string
+          format: uri
+          description: Pre-signed URL valid for 1 hour (present on GET/upload responses)
+          nullable: true
+          example: "https://storage.opsnexus.io/presigned/doc_01hx9q2k3m4n5p6r7s8t0003?expires=3600"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T11:00:00Z"
+
+    DocumentVersion:
+      type: object
+      required: [id, documentId, version, storageKey, uploadedBy, createdAt]
+      properties:
+        id:
+          type: string
+          example: "docver_01hx9q2k3m4n5p6r7s8t0004"
+        documentId:
+          type: string
+          example: "doc_01hx9q2k3m4n5p6r7s8t0003"
+        version:
+          type: integer
+          example: 2
+        storageKey:
+          type: string
+          example: "tenants/tenant_01hx9q2k3m4n5p6r7s8t9u0v/docs/doc_01hx9q2k3m4n5p6r7s8t0003/v2"
+        uploadedBy:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-16T08:30:00Z"
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 24
+        totalPages:
+          type: integer
+          example: 2
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: "The requested resource was not found"
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'

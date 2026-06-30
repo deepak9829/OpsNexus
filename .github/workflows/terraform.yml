@@ -1,0 +1,236 @@
+name: Terraform
+
+on:
+  push:
+    branches: [develop, staging, main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches: [develop, staging, main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options: [plan, apply]
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TF_VERSION: '1.10.0'
+  STATE_BUCKET_REGION: 'ap-southeast-1'
+  STATE_BUCKET: 'opsnexus-tf-state'
+  TF_INPUT: false
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+      backend_file: ${{ steps.resolve.outputs.backend_file }}
+      tfvars_file: ${{ steps.resolve.outputs.tfvars_file }}
+      tf_dir: ${{ steps.resolve.outputs.tf_dir }}
+    steps:
+      - name: Resolve branch to environment
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+
+          case "${ENV}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+            *)       REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
+
+          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+          echo "backend_file=../../../terraform/backends/${ENV}.hcl" >> "$GITHUB_OUTPUT"
+          echo "tfvars_file=${ENV}.tfvars" >> "$GITHUB_OUTPUT"
+          echo "tf_dir=terraform/environments/${ENV}" >> "$GITHUB_OUTPUT"
+          echo "Resolved to environment: ${ENV}"
+
+  plan:
+    name: Terraform Plan (${{ needs.resolve.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: resolve
+    environment: ${{ needs.resolve.outputs.environment }}-plan
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+      security-events: write
+    outputs:
+      plan_changed: ${{ steps.plan.outputs.plan_changed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHATerraformPlan-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: |
+          terraform init \
+            -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -reconfigure
+
+      - name: Terraform Format Check
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        env:
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        run: |
+          set +e
+          terraform plan \
+            -var-file="${{ needs.resolve.outputs.tfvars_file }}" \
+            -out=tfplan.binary \
+            -detailed-exitcode \
+            -no-color 2>&1 | tee plan_output.txt
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "plan_changed=false" >> "$GITHUB_OUTPUT"
+          elif [ $EXIT_CODE -eq 2 ]; then
+            echo "plan_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Terraform plan failed" >&2
+            cat plan_output.txt >&2
+            exit 1
+          fi
+
+          terraform show -json tfplan.binary > tfplan.json
+
+      - name: Upload plan to S3
+        if: steps.plan.outputs.plan_changed == 'true'
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: |
+          aws s3 cp tfplan.binary \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.tfplan
+          aws s3 cp tfplan.json \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.json
+
+      - name: Checkov scan
+        if: steps.plan.outputs.plan_changed == 'true'
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ needs.resolve.outputs.tf_dir }}
+          config_file: terraform/.checkov.yaml
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: false
+        continue-on-error: true
+
+      - name: Upload Checkov SARIF
+        if: steps.plan.outputs.plan_changed == 'true' && always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+        continue-on-error: true
+
+      - name: Comment PR with plan
+        if: github.event_name == 'pull_request' && steps.plan.outputs.plan_changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ needs.resolve.outputs.tf_dir }}/plan_output.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...truncated' : plan;
+            const body = `## Terraform Plan — \`${{ needs.resolve.outputs.environment }}\`\n\n<details><summary>Show Plan</summary>\n\n\`\`\`hcl\n${truncated}\n\`\`\`\n</details>\n\n*Run ID: ${{ github.run_id }} | Plan stored in S3*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+  apply:
+    name: Terraform Apply (${{ needs.resolve.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [resolve, plan]
+    if: |
+      needs.plan.outputs.plan_changed == 'true' &&
+      (
+        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+      )
+    environment: ${{ needs.resolve.outputs.environment }}-deploy
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHATerraformApply-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: |
+          terraform init \
+            -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -reconfigure
+
+      - name: Download plan from S3
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: |
+          aws s3 cp \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.tfplan \
+            tfplan.binary
+
+      - name: Terraform Apply
+        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        run: terraform apply -auto-approve tfplan.binary

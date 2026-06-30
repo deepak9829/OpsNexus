@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: opsnexus
+  labels:
+    app: auth-service
+    component: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        component: service
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL to be ready..."
+              until nc -z mysql 3306; do
+                echo "MySQL not ready yet, sleeping 2s..."
+                sleep 2
+              done
+              echo "MySQL is ready."
+      containers:
+        - name: auth-service
+          image: opsnexus-auth-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: AUTH_SERVICE_PORT
+              value: "8081"
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: AUTH_DB_NAME
+              value: auth_db
+            - name: AUTH_DB_USER
+              value: auth_user
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: opsnexus-secrets
+                  key: auth-db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: opsnexus-secrets
+                  key: jwt-secret
+            - name: JWT_ACCESS_TTL_MINUTES
+              value: "15"
+            - name: JWT_REFRESH_TTL_HOURS
+              value: "168"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

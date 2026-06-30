@@ -1,0 +1,169 @@
+name: Deploy Frontends
+
+on:
+  push:
+    branches: [develop, staging, main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      app:
+        description: 'App to deploy (all, customer-portal, admin-console)'
+        required: false
+        default: 'all'
+
+concurrency:
+  group: frontend-${{ github.ref }}-${{ matrix.app }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+    steps:
+      - name: Resolve branch to environment
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+          case "${ENV}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+            *)       REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
+
+          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy ${{ matrix.app }} (${{ needs.resolve.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [customer-portal, admin-console]
+    environment: ${{ needs.resolve.outputs.environment }}-deploy
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend/${{ matrix.app }}
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend/${{ matrix.app }}
+        env:
+          NODE_ENV: production
+          VITE_ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+          VITE_API_BASE_URL: ${{ secrets.API_BASE_URL }}
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHAFrontend-${{ matrix.app }}-${{ github.run_id }}
+
+      - name: Get S3 bucket, prefix, and CloudFront ID from SSM
+        id: ssm
+        run: |
+          APP_KEY=$(echo "${{ matrix.app }}" | tr '-' '_')
+          ENV="${{ needs.resolve.outputs.environment }}"
+
+          S3_BUCKET=$(aws ssm get-parameter \
+            --name "/opsnexus/${ENV}/${APP_KEY}/s3_bucket" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "")
+
+          # Folder prefix in the shared bucket (e.g. "customer-portal")
+          S3_PREFIX=$(aws ssm get-parameter \
+            --name "/opsnexus/${ENV}/${APP_KEY}/s3_prefix" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "")
+
+          CF_ID=$(aws ssm get-parameter \
+            --name "/opsnexus/${ENV}/${APP_KEY}/cloudfront_id" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "")
+
+          echo "s3_bucket=${S3_BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "s3_prefix=${S3_PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "cloudfront_id=${CF_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync to S3
+        working-directory: frontend/${{ matrix.app }}
+        run: |
+          if [ -z "${{ steps.ssm.outputs.s3_bucket }}" ] || [ -z "${{ steps.ssm.outputs.s3_prefix }}" ]; then
+            echo "Error: S3 bucket or prefix not found in SSM. Run Terraform first."
+            exit 1
+          fi
+          S3_PATH="s3://${{ steps.ssm.outputs.s3_bucket }}/${{ steps.ssm.outputs.s3_prefix }}"
+
+          aws s3 sync dist/ "${S3_PATH}" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+
+          # index.html: no cache (always fetch latest)
+          aws s3 cp dist/index.html "${S3_PATH}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: CloudFront invalidation
+        run: |
+          if [ -z "${{ steps.ssm.outputs.cloudfront_id }}" ]; then
+            echo "Warning: CloudFront distribution ID not found — skipping invalidation"
+            exit 0
+          fi
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.ssm.outputs.cloudfront_id }} \
+            --paths "/*"
+          echo "CloudFront cache invalidated for ${{ matrix.app }}"
+
+      - name: Print deployment URL
+        run: |
+          ENV="${{ needs.resolve.outputs.environment }}"
+          APP="${{ matrix.app }}"
+          if [ "$APP" = "customer-portal" ]; then
+            SUBDOMAIN="app"
+          else
+            SUBDOMAIN="admin"
+          fi
+          if [ "$ENV" = "prod" ]; then
+            echo "Deployed to: https://${SUBDOMAIN}.opsnexus.site"
+          else
+            echo "Deployed to: https://${SUBDOMAIN}.${ENV}.opsnexus.site"
+          fi

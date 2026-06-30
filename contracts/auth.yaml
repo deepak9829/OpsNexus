@@ -1,0 +1,836 @@
+openapi: 3.0.3
+info:
+  title: OpsNexus Auth & Access Service
+  version: 1.0.0
+  description: |
+    Handles authentication, authorization, user registration, JWT token issuance,
+    role management, and permission assignment for the OpsNexus multi-tenant platform.
+
+servers:
+  - url: http://localhost:8081
+    description: Local development
+  - url: https://api.opsnexus.io/auth
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentication
+    description: Login, register, token refresh and logout
+  - name: Profile
+    description: Current user profile management
+  - name: Roles & Permissions
+    description: Role and permission administration (admin only)
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      operationId: registerUser
+      summary: Register a new user
+      description: Creates a new user account within an existing tenant. The user starts in `inactive` status until email verification is completed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: jane.doe@acme.com
+              password: "S3cur3P@ssword!"
+              firstName: Jane
+              lastName: Doe
+              tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+      responses:
+        '201':
+          description: User registered successfully
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+              example:
+                data:
+                  id: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  email: jane.doe@acme.com
+                  firstName: Jane
+                  lastName: Doe
+                  status: inactive
+                  roles: []
+                  createdAt: "2024-01-15T10:30:00Z"
+                  updatedAt: "2024-01-15T10:30:00Z"
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: AUTH_EMAIL_TAKEN
+                  message: "An account with this email already exists"
+                  details: {}
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: loginUser
+      summary: Authenticate user and obtain tokens
+      description: Validates credentials and returns a short-lived access token and a long-lived refresh token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: jane.doe@acme.com
+              password: "S3cur3P@ssword!"
+      responses:
+        '200':
+          description: Authentication successful
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TokenResponse'
+              example:
+                data:
+                  accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfMDFoeDlxMmszb..."
+                  refreshToken: "rt_01hx9q2k3m4n5p6r7s8t9u0vwxyz"
+                  expiresIn: 900
+                  tokenType: Bearer
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: AUTH_INVALID_CREDENTIALS
+                  message: "Email or password is incorrect"
+                  details: {}
+        '403':
+          description: Account suspended or inactive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: AUTH_ACCOUNT_SUSPENDED
+                  message: "Your account has been suspended. Contact your administrator."
+                  details:
+                    status: suspended
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshToken
+      summary: Refresh access token
+      description: Exchanges a valid refresh token for a new access token. The old refresh token is invalidated (token rotation).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refreshToken: "rt_01hx9q2k3m4n5p6r7s8t9u0vwxyz"
+      responses:
+        '200':
+          description: New access token issued
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TokenResponse'
+              example:
+                data:
+                  accessToken: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfMDFoeDlx..."
+                  refreshToken: "rt_01hx9q2k3m4n5p6r7s8t9u1aaaa"
+                  expiresIn: 900
+                  tokenType: Bearer
+        '401':
+          description: Refresh token invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: AUTH_REFRESH_INVALID
+                  message: "Refresh token is invalid or has expired"
+                  details: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutUser
+      summary: Invalidate refresh token
+      description: Revokes the provided refresh token, effectively logging the user out of the session. The access token expires naturally per its TTL.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refreshToken: "rt_01hx9q2k3m4n5p6r7s8t9u0vwxyz"
+      responses:
+        '204':
+          description: Logout successful — token invalidated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Profile]
+      operationId: getCurrentUser
+      summary: Get current authenticated user
+      description: Returns the full profile of the user identified by the Bearer token.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Current user profile
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+              example:
+                data:
+                  id: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                  tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                  email: jane.doe@acme.com
+                  firstName: Jane
+                  lastName: Doe
+                  status: active
+                  roles:
+                    - id: "role_operator"
+                      name: operator
+                      permissions:
+                        - id: "perm_cases_read"
+                          resource: cases
+                          action: read
+                        - id: "perm_cases_write"
+                          resource: cases
+                          action: write
+                  createdAt: "2024-01-15T10:30:00Z"
+                  updatedAt: "2024-01-20T08:00:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Profile]
+      operationId: updateCurrentUser
+      summary: Update own profile
+      description: Allows the authenticated user to update their own first name, last name, or password.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            example:
+              firstName: Jane
+              lastName: Smith
+              currentPassword: "S3cur3P@ssword!"
+              newPassword: "N3wS3cur3P@ss!"
+      responses:
+        '200':
+          description: Profile updated successfully
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/roles:
+    get:
+      tags: [Roles & Permissions]
+      operationId: listRoles
+      summary: List all roles (admin only)
+      description: Returns all roles defined within the current tenant. Requires the `admin` role.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: List of roles
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "role_admin"
+                    name: admin
+                    permissions:
+                      - id: "perm_all"
+                        resource: "*"
+                        action: admin
+                  - id: "role_operator"
+                    name: operator
+                    permissions:
+                      - id: "perm_cases_read"
+                        resource: cases
+                        action: read
+                      - id: "perm_cases_write"
+                        resource: cases
+                        action: write
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 2
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Roles & Permissions]
+      operationId: createRole
+      summary: Create a new role (admin only)
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+            example:
+              name: auditor
+              permissions:
+                - resource: cases
+                  action: read
+                - resource: audit-events
+                  action: read
+      responses:
+        '201':
+          description: Role created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Role'
+              example:
+                data:
+                  id: "role_auditor"
+                  name: auditor
+                  permissions:
+                    - id: "perm_cases_read"
+                      resource: cases
+                      action: read
+                    - id: "perm_audit_read"
+                      resource: audit-events
+                      action: read
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Role name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: ROLE_NAME_CONFLICT
+                  message: "A role with this name already exists"
+                  details: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/users/{userId}/roles:
+    post:
+      tags: [Roles & Permissions]
+      operationId: assignRoleToUser
+      summary: Assign role to user (admin only)
+      description: Assigns one or more roles to an existing user within the tenant.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The unique user identifier
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleRequest'
+            example:
+              roleIds:
+                - "role_operator"
+                - "role_auditor"
+      responses:
+        '200':
+          description: Roles assigned — returns updated user
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256-signed JWT. Include as `Authorization: Bearer <token>`.
+
+  headers:
+    XRequestId:
+      description: Unique identifier for the request, useful for distributed tracing
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  parameters:
+    XTenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: The tenant context for the request
+      schema:
+        type: string
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number (1-based)
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Number of results per page (max 100)
+
+  responses:
+    BadRequest:
+      description: Bad request — malformed payload or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "Request body is malformed or missing required fields"
+              details:
+                fields:
+                  - field: email
+                    issue: "must be a valid email address"
+    Unauthorized:
+      description: Unauthorized — missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_UNAUTHORIZED
+              message: "Invalid or expired token"
+              details: {}
+    Forbidden:
+      description: Forbidden — insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_FORBIDDEN
+              message: "You do not have permission to perform this action"
+              details:
+                required: admin
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: NOT_FOUND
+              message: "The requested resource was not found"
+              details: {}
+    UnprocessableEntity:
+      description: Validation errors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "One or more fields failed validation"
+              details:
+                fields:
+                  - field: password
+                    issue: "must be at least 8 characters and contain a number"
+    InternalServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: "An unexpected error occurred. Please try again later."
+              details: {}
+
+  schemas:
+    User:
+      type: object
+      required: [id, tenantId, email, firstName, lastName, status, roles, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique user identifier
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        tenantId:
+          type: string
+          description: Tenant this user belongs to
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        email:
+          type: string
+          format: email
+          example: jane.doe@acme.com
+        firstName:
+          type: string
+          example: Jane
+        lastName:
+          type: string
+          example: Doe
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: active
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2024-01-20T08:00:00Z"
+
+    Role:
+      type: object
+      required: [id, name, permissions]
+      properties:
+        id:
+          type: string
+          example: "role_operator"
+        name:
+          type: string
+          example: operator
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+
+    Permission:
+      type: object
+      required: [id, resource, action]
+      properties:
+        id:
+          type: string
+          example: "perm_cases_read"
+        resource:
+          type: string
+          description: Resource this permission applies to (use `*` for all)
+          example: cases
+        action:
+          type: string
+          enum: [read, write, delete, admin]
+          example: read
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane.doe@acme.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "S3cur3P@ssword!"
+
+    RegisterRequest:
+      type: object
+      required: [email, password, firstName, lastName, tenantId]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane.doe@acme.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "S3cur3P@ssword!"
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Jane
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Doe
+        tenantId:
+          type: string
+          description: The tenant to register under
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Jane
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Smith
+        currentPassword:
+          type: string
+          format: password
+          description: Required only when changing password
+          example: "S3cur3P@ssword!"
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          description: Required only when changing password
+          example: "N3wS3cur3P@ss!"
+
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, tokenType]
+      properties:
+        accessToken:
+          type: string
+          description: Short-lived JWT (default TTL 15 min)
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refreshToken:
+          type: string
+          description: Long-lived opaque token (default TTL 30 days)
+          example: "rt_01hx9q2k3m4n5p6r7s8t9u0vwxyz"
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds
+          example: 900
+        tokenType:
+          type: string
+          enum: [Bearer]
+          example: Bearer
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          example: "rt_01hx9q2k3m4n5p6r7s8t9u0vwxyz"
+
+    CreateRoleRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 64
+          example: auditor
+        permissions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [resource, action]
+            properties:
+              resource:
+                type: string
+                example: cases
+              action:
+                type: string
+                enum: [read, write, delete, admin]
+                example: read
+
+    AssignRoleRequest:
+      type: object
+      required: [roleIds]
+      properties:
+        roleIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          example: ["role_operator", "role_auditor"]
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 42
+        totalPages:
+          type: integer
+          example: 3
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: AUTH_UNAUTHORIZED
+        message:
+          type: string
+          description: Human-readable error description
+          example: "Invalid or expired token"
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured details (e.g. field-level validation errors)
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'

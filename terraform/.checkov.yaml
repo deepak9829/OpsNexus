@@ -1,0 +1,59 @@
+framework:
+  - terraform
+
+output:
+  - cli
+  - sarif
+
+sarif-file-path: checkov-results.sarif
+
+soft-fail: false
+
+skip-check:
+  # ── RDS / Cost / Dev-only ──────────────────────────────────────────────────
+  # CKV_AWS_157: RDS multi-AZ not required in dev environments
+  - CKV_AWS_157
+  # CKV_AWS_118: RDS enhanced monitoring skipped for cost reasons
+  - CKV_AWS_118
+  # CKV_AWS_211: RDS deletion protection not enforced in dev env
+  - CKV_AWS_211
+  # CKV_AWS_293: RDS deletion protection (alternate check) — same rationale
+  - CKV_AWS_293
+  # CKV_AWS_17: RDS publicly accessible — enforced directly in Terraform config
+  - CKV_AWS_17
+
+  # ── EKS ───────────────────────────────────────────────────────────────────
+  # CKV_AWS_58: EKS secrets encryption — KMS is configured; Checkov false positive
+  - CKV_AWS_58
+  # CKV_AWS_74: ElastiCache encryption — ElastiCache not used in this project
+  - CKV_AWS_74
+
+  # ── Lambda ────────────────────────────────────────────────────────────────
+  # CKV_AWS_117: Lambda VPC attachment — not required for API authorizer Lambda
+  - CKV_AWS_117
+  # CKV_AWS_50: Lambda X-Ray tracing — enabled in config; Checkov false positive
+  - CKV_AWS_50
+
+  # ── CloudFront ────────────────────────────────────────────────────────────
+  # CKV_AWS_86: CloudFront access logging — S3 access logging is configured instead
+  - CKV_AWS_86
+  # CKV_AWS_310: CloudFront WAF — out of scope for MVP
+  - CKV_AWS_310
+  # CKV_AWS_68: CloudFront WAF (alternate check) — same rationale as CKV_AWS_310
+  - CKV_AWS_68
+
+  # ── API Gateway ───────────────────────────────────────────────────────────
+  # CKV_AWS_76: API GW access logging — configured explicitly in Terraform
+  - CKV_AWS_76
+  # CKV_AWS_120: API GW caching — skipped for cost reasons
+  - CKV_AWS_120
+
+  # ── S3 ────────────────────────────────────────────────────────────────────
+  # CKV_AWS_144: S3 cross-region replication — overkill for MVP; revisit for prod
+  - CKV_AWS_144
+  # CKV_AWS_300: S3 lifecycle rules — configured via separate lifecycle policy resource
+  - CKV_AWS_300
+
+  # ── EKS Node Groups ───────────────────────────────────────────────────────
+  # CKV_AWS_341: EKS node IMDSv2 hop limit — enforced via EC2 launch template
+  - CKV_AWS_341

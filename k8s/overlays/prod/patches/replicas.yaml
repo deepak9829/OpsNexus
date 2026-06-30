@@ -1,0 +1,40 @@
+# Prod: minimum 2 replicas per service for HA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: opsnexus
+spec:
+  replicas: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-service
+  namespace: opsnexus
+spec:
+  replicas: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-service
+  namespace: opsnexus
+spec:
+  replicas: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-service
+  namespace: opsnexus
+spec:
+  replicas: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: opsnexus
+spec:
+  replicas: 2

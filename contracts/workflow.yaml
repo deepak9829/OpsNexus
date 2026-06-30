@@ -1,0 +1,1286 @@
+openapi: 3.0.3
+info:
+  title: OpsNexus Workflow & Case Service
+  version: 1.0.0
+  description: |
+    Manages the full lifecycle of operational cases: creation, state transitions,
+    task management, comments, SLA tracking, and workflow template definitions.
+    All endpoints require a valid Bearer token scoped to the tenant identified by X-Tenant-ID.
+
+servers:
+  - url: http://localhost:8083
+    description: Local development
+  - url: https://api.opsnexus.io/workflow
+    description: Production
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Cases
+    description: Operational case lifecycle management
+  - name: Tasks
+    description: Task management within cases
+  - name: Comments
+    description: Case comments and activity feed
+  - name: Workflows
+    description: Workflow template definitions
+
+paths:
+  /api/v1/cases:
+    get:
+      tags: [Cases]
+      operationId: listCases
+      summary: List cases
+      description: Returns a paginated list of cases for the tenant. Supports filtering by status, assignee, and priority.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [new, open, in_progress, pending, resolved, closed]
+          description: Filter by case status
+          example: in_progress
+        - name: priority
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+          description: Filter by priority level
+        - name: assigneeId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter cases assigned to a specific user
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        - name: workflowId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by workflow template
+        - name: tags
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+          description: Filter by one or more tags (comma-separated)
+        - name: slaBreached
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filter cases where SLA has been breached
+      responses:
+        '200':
+          description: Paginated list of cases
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Case'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    caseNumber: "CASE-2024-00142"
+                    title: "Production database failover failed"
+                    description: "Automated failover to replica-2 did not complete within the 30-second window."
+                    status: in_progress
+                    priority: critical
+                    assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    reporterId: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+                    workflowId: "wf_incident_v2"
+                    sla:
+                      dueAt: "2024-01-15T14:00:00Z"
+                      breached: false
+                    tags: ["database", "production", "failover"]
+                    createdAt: "2024-01-15T10:30:00Z"
+                    updatedAt: "2024-01-15T11:45:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 156
+                  totalPages: 8
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Cases]
+      operationId: createCase
+      summary: Create a new case
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCaseRequest'
+            example:
+              title: "SSL certificate expiring in 3 days"
+              description: "The wildcard certificate for *.acme.com expires 2024-01-18. Renewal must be completed before expiry to avoid service disruption."
+              priority: high
+              workflowId: "wf_change_management_v1"
+              tags: ["ssl", "certificate", "infra"]
+              assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+      responses:
+        '201':
+          description: Case created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cases/{caseId}:
+    parameters:
+      - $ref: '#/components/parameters/CaseIdPath'
+
+    get:
+      tags: [Cases]
+      operationId: getCase
+      summary: Get case by ID
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          description: Case details
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Case'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Cases]
+      operationId: updateCase
+      summary: Update case fields
+      description: Updates mutable case fields. Status transitions should use the `/transitions` sub-resource.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCaseRequest'
+            example:
+              title: "SSL certificate expiring in 2 days — URGENT"
+              priority: critical
+              tags: ["ssl", "certificate", "infra", "urgent"]
+      responses:
+        '200':
+          description: Case updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cases/{caseId}/transitions:
+    parameters:
+      - $ref: '#/components/parameters/CaseIdPath'
+
+    post:
+      tags: [Cases]
+      operationId: transitionCase
+      summary: Transition case to a new status
+      description: |
+        Moves the case to a new status according to the transitions defined in the
+        associated workflow template. Returns the transition record and updated case.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionCaseRequest'
+            example:
+              toStatus: resolved
+              reason: "SSL certificate successfully renewed. Verified across all edge nodes."
+      responses:
+        '200':
+          description: Transition applied
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      transition:
+                        $ref: '#/components/schemas/CaseTransition'
+                      case:
+                        $ref: '#/components/schemas/Case'
+              example:
+                data:
+                  transition:
+                    fromStatus: in_progress
+                    toStatus: resolved
+                    reason: "SSL certificate successfully renewed. Verified across all edge nodes."
+                    performedBy: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    performedAt: "2024-01-16T09:00:00Z"
+                  case:
+                    id: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    status: resolved
+        '400':
+          description: Invalid transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: WORKFLOW_INVALID_TRANSITION
+                  message: "Cannot transition from 'new' to 'resolved'. Allowed transitions: open, closed."
+                  details:
+                    currentStatus: new
+                    requestedStatus: resolved
+                    allowedTransitions: [open, closed]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cases/{caseId}/assign:
+    parameters:
+      - $ref: '#/components/parameters/CaseIdPath'
+
+    post:
+      tags: [Cases]
+      operationId: assignCase
+      summary: Assign case to a user
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assigneeId]
+              properties:
+                assigneeId:
+                  type: string
+                  description: User ID to assign the case to
+                  example: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+                note:
+                  type: string
+                  description: Optional note to include with the assignment
+                  example: "Assigning to Jane — she owns the cert renewal runbook."
+            example:
+              assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+              note: "Assigning to Jane — she owns the cert renewal runbook."
+      responses:
+        '200':
+          description: Case assigned
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cases/{caseId}/tasks:
+    parameters:
+      - $ref: '#/components/parameters/CaseIdPath'
+
+    get:
+      tags: [Tasks]
+      operationId: listCaseTasks
+      summary: List tasks for a case
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [todo, in_progress, done, blocked]
+      responses:
+        '200':
+          description: Task list for the case
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "task_01hx9q2k3m4n5p6r7s8aaaaa"
+                    caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    title: "Run cert-renew.sh on prod-infra-01"
+                    description: "Execute the renewal script and capture output."
+                    status: todo
+                    assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+                    dueAt: "2024-01-16T08:00:00Z"
+                    completedAt: null
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 3
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create a task within a case
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+            example:
+              title: "Run cert-renew.sh on prod-infra-01"
+              description: "Execute the renewal script and capture output."
+              assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+              dueAt: "2024-01-16T08:00:00Z"
+      responses:
+        '201':
+          description: Task created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tasks/{taskId}:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "task_01hx9q2k3m4n5p6r7s8aaaaa"
+
+    put:
+      tags: [Tasks]
+      operationId: updateTask
+      summary: Update task details
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+            example:
+              status: in_progress
+              assigneeId: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+      responses:
+        '200':
+          description: Task updated
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tasks/{taskId}/complete:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: "task_01hx9q2k3m4n5p6r7s8aaaaa"
+
+    post:
+      tags: [Tasks]
+      operationId: completeTask
+      summary: Mark a task as completed
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  description: Optional completion note
+                  example: "Script ran successfully. New expiry: 2025-01-16."
+      responses:
+        '200':
+          description: Task marked as complete
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Task'
+              example:
+                data:
+                  id: "task_01hx9q2k3m4n5p6r7s8aaaaa"
+                  caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                  title: "Run cert-renew.sh on prod-infra-01"
+                  status: done
+                  completedAt: "2024-01-16T07:55:00Z"
+        '400':
+          description: Task already completed or blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                error:
+                  code: TASK_ALREADY_COMPLETED
+                  message: "This task has already been marked as done"
+                  details: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cases/{caseId}/comments:
+    parameters:
+      - $ref: '#/components/parameters/CaseIdPath'
+
+    get:
+      tags: [Comments]
+      operationId: listCaseComments
+      summary: List comments on a case
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Comment list for the case
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "cmt_01hx9q2k3m4n5p6r7s8bbbbb"
+                    caseId: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+                    authorId: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+                    body: "I've started the renewal process. Will update once the cert is propagated."
+                    createdAt: "2024-01-15T12:00:00Z"
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 5
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Comments]
+      operationId: addCaseComment
+      summary: Add a comment to a case
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
+                  description: Markdown-supported comment body
+                  example: "I've started the renewal process. Will update once the cert is propagated."
+            example:
+              body: "I've started the renewal process. Will update once the cert is propagated."
+      responses:
+        '201':
+          description: Comment added
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Comment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/workflows:
+    get:
+      tags: [Workflows]
+      operationId: listWorkflows
+      summary: List workflow templates
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Workflow template list
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workflow'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                data:
+                  - id: "wf_incident_v2"
+                    tenantId: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+                    name: "Incident Management v2"
+                    states: [new, open, in_progress, pending, resolved, closed]
+                    transitions:
+                      - from: new
+                        to: [open, closed]
+                      - from: open
+                        to: [in_progress, closed]
+                      - from: in_progress
+                        to: [pending, resolved]
+                      - from: pending
+                        to: [in_progress, resolved]
+                      - from: resolved
+                        to: [closed, in_progress]
+                    defaultPriority: medium
+                    slaHours: 4
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 3
+                  totalPages: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Workflows]
+      operationId: createWorkflow
+      summary: Create a workflow template
+      description: Defines a new workflow template for the tenant. Requires `admin` role.
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRequest'
+            example:
+              name: "Change Management v1"
+              states: [new, open, in_progress, pending_approval, approved, closed]
+              transitions:
+                - from: new
+                  to: [open]
+                - from: open
+                  to: [in_progress, closed]
+                - from: in_progress
+                  to: [pending_approval]
+                - from: pending_approval
+                  to: [approved, in_progress]
+                - from: approved
+                  to: [closed]
+              defaultPriority: medium
+              slaHours: 72
+      responses:
+        '201':
+          description: Workflow template created
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workflow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256-signed JWT. Include as `Authorization: Bearer <token>`.
+
+  headers:
+    XRequestId:
+      description: Unique identifier for the request, useful for distributed tracing
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  parameters:
+    XTenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: The tenant context for the request
+      schema:
+        type: string
+      example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+    CaseIdPath:
+      name: caseId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Case identifier
+      example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "Request body is malformed or missing required fields"
+              details: {}
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_UNAUTHORIZED
+              message: "Invalid or expired token"
+              details: {}
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: AUTH_FORBIDDEN
+              message: "You do not have permission to perform this action"
+              details: {}
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: NOT_FOUND
+              message: "The requested resource was not found"
+              details: {}
+    UnprocessableEntity:
+      description: Validation errors
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "One or more fields failed validation"
+              details: {}
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: "An unexpected error occurred. Please try again later."
+              details: {}
+
+  schemas:
+    Case:
+      type: object
+      required: [id, tenantId, caseNumber, title, status, priority, reporterId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        caseNumber:
+          type: string
+          description: Human-readable case identifier
+          example: "CASE-2024-00142"
+        title:
+          type: string
+          example: "Production database failover failed"
+        description:
+          type: string
+          nullable: true
+          example: "Automated failover to replica-2 did not complete within the 30-second window."
+        status:
+          type: string
+          enum: [new, open, in_progress, pending, resolved, closed]
+          example: in_progress
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          example: critical
+        assigneeId:
+          type: string
+          nullable: true
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        reporterId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+        workflowId:
+          type: string
+          nullable: true
+          example: "wf_incident_v2"
+        sla:
+          type: object
+          nullable: true
+          properties:
+            dueAt:
+              type: string
+              format: date-time
+              example: "2024-01-15T14:00:00Z"
+            breached:
+              type: boolean
+              example: false
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["database", "production", "failover"]
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T11:45:00Z"
+
+    CreateCaseRequest:
+      type: object
+      required: [title, priority]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 500
+          example: "SSL certificate expiring in 3 days"
+        description:
+          type: string
+          maxLength: 50000
+          example: "The wildcard certificate for *.acme.com expires 2024-01-18."
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          example: high
+        workflowId:
+          type: string
+          nullable: true
+          example: "wf_change_management_v1"
+        assigneeId:
+          type: string
+          nullable: true
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["ssl", "certificate"]
+
+    UpdateCaseRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 50000
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        tags:
+          type: array
+          items:
+            type: string
+
+    TransitionCaseRequest:
+      type: object
+      required: [toStatus]
+      properties:
+        toStatus:
+          type: string
+          enum: [new, open, in_progress, pending, resolved, closed]
+          example: resolved
+        reason:
+          type: string
+          maxLength: 2000
+          description: Human-readable reason for the transition
+          example: "SSL certificate successfully renewed."
+
+    CaseTransition:
+      type: object
+      required: [fromStatus, toStatus, performedBy, performedAt]
+      properties:
+        fromStatus:
+          type: string
+          enum: [new, open, in_progress, pending, resolved, closed]
+          example: in_progress
+        toStatus:
+          type: string
+          enum: [new, open, in_progress, pending, resolved, closed]
+          example: resolved
+        reason:
+          type: string
+          nullable: true
+          example: "SSL certificate successfully renewed."
+        performedBy:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        performedAt:
+          type: string
+          format: date-time
+          example: "2024-01-16T09:00:00Z"
+
+    Task:
+      type: object
+      required: [id, caseId, title, status, createdAt]
+      properties:
+        id:
+          type: string
+          example: "task_01hx9q2k3m4n5p6r7s8aaaaa"
+        caseId:
+          type: string
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        title:
+          type: string
+          example: "Run cert-renew.sh on prod-infra-01"
+        description:
+          type: string
+          nullable: true
+          example: "Execute the renewal script and capture output."
+        status:
+          type: string
+          enum: [todo, in_progress, done, blocked]
+          example: todo
+        assigneeId:
+          type: string
+          nullable: true
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-01-16T08:00:00Z"
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: "Run cert-renew.sh on prod-infra-01"
+        description:
+          type: string
+          maxLength: 10000
+          example: "Execute the renewal script and capture output."
+        assigneeId:
+          type: string
+          nullable: true
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u0v"
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-01-16T08:00:00Z"
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 10000
+        status:
+          type: string
+          enum: [todo, in_progress, done, blocked]
+        assigneeId:
+          type: string
+          nullable: true
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Comment:
+      type: object
+      required: [id, caseId, authorId, body, createdAt]
+      properties:
+        id:
+          type: string
+          example: "cmt_01hx9q2k3m4n5p6r7s8bbbbb"
+        caseId:
+          type: string
+          example: "case_01hx9q2k3m4n5p6r7s8t9u0v"
+        authorId:
+          type: string
+          example: "usr_01hx9q2k3m4n5p6r7s8t9u1aa"
+        body:
+          type: string
+          description: Markdown-supported comment content
+          example: "I've started the renewal process. Will update once the cert is propagated."
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T12:00:00Z"
+
+    Workflow:
+      type: object
+      required: [id, tenantId, name, states, transitions, defaultPriority, slaHours]
+      properties:
+        id:
+          type: string
+          example: "wf_incident_v2"
+        tenantId:
+          type: string
+          example: "tenant_01hx9q2k3m4n5p6r7s8t9u0v"
+        name:
+          type: string
+          example: "Incident Management v2"
+        states:
+          type: array
+          items:
+            type: string
+          example: [new, open, in_progress, pending, resolved, closed]
+        transitions:
+          type: array
+          items:
+            type: object
+            required: [from, to]
+            properties:
+              from:
+                type: string
+                example: new
+              to:
+                type: array
+                items:
+                  type: string
+                example: [open, closed]
+        defaultPriority:
+          type: string
+          enum: [low, medium, high, critical]
+          example: medium
+        slaHours:
+          type: integer
+          description: Default SLA duration in hours
+          example: 4
+
+    CreateWorkflowRequest:
+      type: object
+      required: [name, states, transitions, defaultPriority, slaHours]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+          example: "Change Management v1"
+        states:
+          type: array
+          minItems: 2
+          items:
+            type: string
+          example: [new, open, in_progress, pending_approval, approved, closed]
+        transitions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [from, to]
+            properties:
+              from:
+                type: string
+              to:
+                type: array
+                items:
+                  type: string
+        defaultPriority:
+          type: string
+          enum: [low, medium, high, critical]
+          example: medium
+        slaHours:
+          type: integer
+          minimum: 1
+          example: 72
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 156
+        totalPages:
+          type: integer
+          example: 8
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: "The requested resource was not found"
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'

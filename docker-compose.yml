@@ -1,0 +1,219 @@
+version: "3.9"
+
+# ============================================================
+# OpsNexus Docker Compose
+#
+# Infrastructure services start by default.
+# Application services require --profile app:
+#   docker compose --profile app up -d
+# Or use: make dev-up-all
+# ============================================================
+
+networks:
+  opsnexus-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  mongo_data:
+  localstack_data:
+
+services:
+  # ============================================================
+  # MySQL 8.0 — auth_db, tenant_db, workflow_db
+  # ============================================================
+  mysql:
+    image: mysql:8.0
+    container_name: opsnexus-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - opsnexus-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ============================================================
+  # MongoDB 7.0 — documents_db
+  # ============================================================
+  mongodb:
+    image: mongo:7.0
+    container_name: opsnexus-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-documents_db}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - opsnexus-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ============================================================
+  # LocalStack 3.4 — DynamoDB (notifications, audit_events)
+  # ============================================================
+  localstack:
+    image: localstack/localstack-pro:latest
+    container_name: opsnexus-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: dynamodb
+      DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      DEBUG: 0
+      DATA_DIR: /var/lib/localstack/data
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - opsnexus-net
+    healthcheck:
+      test: ["CMD", "awslocal", "dynamodb", "list-tables"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ============================================================
+  # Auth Service :8081
+  # ============================================================
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: opsnexus-auth
+    restart: unless-stopped
+    profiles: ["app"]
+    environment:
+      AUTH_SERVICE_PORT: ${AUTH_SERVICE_PORT:-8081}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      AUTH_DB_NAME: ${AUTH_DB_NAME:-auth_db}
+      AUTH_DB_USER: ${AUTH_DB_USER:-auth_user}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-32-chars}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
+      JWT_REFRESH_TTL_HOURS: ${JWT_REFRESH_TTL_HOURS:-168}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - opsnexus-net
+
+  # ============================================================
+  # Tenant Service :8082
+  # ============================================================
+  tenant-service:
+    build:
+      context: ./services/tenant-service
+      dockerfile: Dockerfile
+    container_name: opsnexus-tenant
+    restart: unless-stopped
+    profiles: ["app"]
+    environment:
+      TENANT_SERVICE_PORT: ${TENANT_SERVICE_PORT:-8082}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      TENANT_DB_NAME: ${TENANT_DB_NAME:-tenant_db}
+      TENANT_DB_USER: ${TENANT_DB_USER:-tenant_user}
+      TENANT_DB_PASSWORD: ${TENANT_DB_PASSWORD:-tenant_pass}
+    ports:
+      - "${TENANT_SERVICE_PORT:-8082}:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - opsnexus-net
+
+  # ============================================================
+  # Workflow Service :8083
+  # ============================================================
+  workflow-service:
+    build:
+      context: ./services/workflow-service
+      dockerfile: Dockerfile
+    container_name: opsnexus-workflow
+    restart: unless-stopped
+    profiles: ["app"]
+    environment:
+      SERVER_PORT: ${WORKFLOW_SERVICE_PORT:-8083}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${WORKFLOW_DB_NAME:-workflow_db}
+      DB_USER: ${WORKFLOW_DB_USER:-workflow_user}
+      DB_PASSWORD: ${WORKFLOW_DB_PASSWORD:-workflow_pass}
+    ports:
+      - "${WORKFLOW_SERVICE_PORT:-8083}:8083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - opsnexus-net
+
+  # ============================================================
+  # Document Service :8084
+  # ============================================================
+  document-service:
+    build:
+      context: ./services/document-service
+      dockerfile: Dockerfile
+    container_name: opsnexus-document
+    restart: unless-stopped
+    profiles: ["app"]
+    environment:
+      DOCUMENT_SERVICE_PORT: ${DOCUMENT_SERVICE_PORT:-8084}
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-documents_db}
+    ports:
+      - "${DOCUMENT_SERVICE_PORT:-8084}:8084"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - opsnexus-net
+
+  # ============================================================
+  # Notification Service :8085
+  # ============================================================
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: opsnexus-notification
+    restart: unless-stopped
+    profiles: ["app"]
+    environment:
+      NOTIFICATION_SERVICE_PORT: ${NOTIFICATION_SERVICE_PORT:-8085}
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      DYNAMODB_NOTIFICATIONS_TABLE: ${DYNAMODB_NOTIFICATIONS_TABLE:-notifications}
+      DYNAMODB_AUDIT_TABLE: ${DYNAMODB_AUDIT_TABLE:-audit_events}
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8085}:8085"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - opsnexus-net

@@ -1,0 +1,142 @@
+name: Deploy to EKS
+
+on:
+  workflow_run:
+    workflows: ["Build & Push Images"]
+    types: [completed]
+    branches: [develop, staging, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      image_tag:
+        description: 'Image tag to deploy (default: commit SHA)'
+        required: false
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  KUSTOMIZE_DIR: 'k8s/overlays'
+
+jobs:
+  resolve:
+    name: Resolve environment
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      aws_region: ${{ steps.resolve.outputs.aws_region }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      cluster_name: ${{ steps.resolve.outputs.cluster_name }}
+    steps:
+      - name: Resolve environment and image tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+            TAG="${{ github.event.inputs.image_tag || github.sha }}"
+          elif [ "${{ github.event.workflow_run.head_branch }}" = "main" ]; then
+            ENV="prod"
+            TAG="${{ github.event.workflow_run.head_sha }}"
+          elif [ "${{ github.event.workflow_run.head_branch }}" = "staging" ]; then
+            ENV="staging"
+            TAG="${{ github.event.workflow_run.head_sha }}"
+          else
+            ENV="dev"
+            TAG="${{ github.event.workflow_run.head_sha }}"
+          fi
+
+          case "${ENV}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+            *)       REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
+
+          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=opsnexus-${ENV}-eks" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to EKS (${{ needs.resolve.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: resolve
+    environment: ${{ needs.resolve.outputs.environment }}-deploy
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          role-session-name: GHADeploy-${{ github.run_id }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ needs.resolve.outputs.cluster_name }} \
+            --region ${{ needs.resolve.outputs.aws_region }}
+
+      - name: Apply Karpenter NodeClass and NodePool
+        env:
+          PROJECT_NAME: opsnexus
+          ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+          NODE_ROLE_NAME: opsnexus-${{ needs.resolve.outputs.environment }}-node-role
+        run: |
+          envsubst < k8s/karpenter/ec2nodeclass.yaml | kubectl apply -f -
+          envsubst < k8s/karpenter/nodepool.yaml     | kubectl apply -f -
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Update image tags in kustomize overlay
+        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          TAG="${{ needs.resolve.outputs.image_tag }}"
+
+          for SERVICE in auth-service tenant-service workflow-service document-service notification-service; do
+            kustomize edit set image \
+              "opsnexus/${SERVICE}=${ECR_REGISTRY}/opsnexus/${SERVICE}:${TAG}"
+          done
+
+      - name: Apply Kustomize overlay
+        run: |
+          kubectl apply -k k8s/overlays/${{ needs.resolve.outputs.environment }} \
+            --namespace opsnexus
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment \
+            --namespace opsnexus \
+            --timeout=600s
+
+      - name: Verify pods
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n opsnexus -o wide
+          echo "=== Services ==="
+          kubectl get svc -n opsnexus
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed — rolling back all deployments"
+          kubectl rollout undo deployment \
+            --namespace opsnexus || true

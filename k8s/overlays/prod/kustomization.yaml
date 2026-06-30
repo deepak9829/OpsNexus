@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opsnexus
+
+resources:
+  - ../../base
+
+images:
+  - name: opsnexus/auth-service
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/opsnexus/auth-service
+    newTag: latest
+  - name: opsnexus/tenant-service
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/opsnexus/tenant-service
+    newTag: latest
+  - name: opsnexus/workflow-service
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/opsnexus/workflow-service
+    newTag: latest
+  - name: opsnexus/document-service
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/opsnexus/document-service
+    newTag: latest
+  - name: opsnexus/notification-service
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/opsnexus/notification-service
+    newTag: latest
+
+patches:
+  - path: patches/replicas.yaml
+  - path: patches/resources.yaml
+  - path: patches/hpa.yaml

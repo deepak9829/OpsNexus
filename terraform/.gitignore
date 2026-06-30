@@ -1,0 +1,26 @@
+# Terraform state and local files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plan files
+*.tfplan
+tfplan.binary
+tfplan.json
+checkov-results.sarif
+
+# Sensitive var files (not environment tfvars - those are committed)
+*.auto.tfvars
+
+# Provider lock files ARE committed
+# .terraform.lock.hcl is NOT in this gitignore
+
+# OS files
+.DS_Store
+Thumbs.db
