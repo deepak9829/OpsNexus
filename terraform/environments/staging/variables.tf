@@ -99,12 +99,6 @@ variable "nlb_arn" {
   description = "NLB ARN from Traefik install. Empty until Traefik deployed."
 }
 
-variable "jwt_secret" {
-  type        = string
-  sensitive   = true
-  description = "JWT signing secret. Pass via TF_VAR_jwt_secret or CI/CD - never in tfvars."
-}
-
 variable "caylent_owner" {
   type    = string
   default = "deepak.saini@caylent.com"
@@ -129,4 +123,19 @@ variable "enable_nat_per_az" {
   type        = bool
   default     = false
   description = "true for prod HA, false for dev/staging cost savings"
+}
+
+variable "tf_state_bucket" {
+  type        = string
+  description = "S3 bucket name for Terraform state"
+}
+
+variable "tf_state_key" {
+  type        = string
+  description = "S3 key path for this environment's state file"
+}
+
+variable "tf_state_region" {
+  type        = string
+  description = "AWS region where the state bucket lives"
 }

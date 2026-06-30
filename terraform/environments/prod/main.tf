@@ -168,23 +168,41 @@ module "rds" {
   depends_on = [module.eks]
 }
 
-# ─── API Gateway + Lambda Authorizer ──────────────────────────────────────
-module "lambda_authorizer" {
-  source       = "../../modules/lambda_authorizer"
+module "app_secrets" {
+  source       = "../../modules/app_secrets"
   project_name = var.project_name
   environment  = var.environment
-  jwt_secret   = var.jwt_secret
+}
+
+module "eso" {
+  source            = "../../modules/eso"
+  project_name      = var.project_name
+  environment       = var.environment
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_provider_url = module.eks.oidc_provider_url
+
+  depends_on = [module.karpenter]
+}
+
+# ─── API Gateway + Lambda Authorizer ──────────────────────────────────────
+module "lambda_authorizer" {
+  source         = "../../modules/lambda_authorizer"
+  project_name   = var.project_name
+  environment    = var.environment
+  jwt_secret_arn = module.app_secrets.jwt_secret_arn
 }
 
 module "api_gateway" {
-  source                 = "../../modules/api_gateway"
-  project_name           = var.project_name
-  environment            = var.environment
-  vpc_id                 = module.vpc.vpc_id
-  private_eks_subnet_ids = module.subnets.private_eks_subnet_ids
-  lambda_invoke_arn      = module.lambda_authorizer.lambda_invoke_arn
-  lambda_function_name   = module.lambda_authorizer.lambda_function_name
-  traefik_node_port      = 30080
+  source                   = "../../modules/api_gateway"
+  project_name             = var.project_name
+  environment              = var.environment
+  vpc_id                   = module.vpc.vpc_id
+  private_eks_subnet_ids   = module.subnets.private_eks_subnet_ids
+  lambda_invoke_arn        = module.lambda_authorizer.lambda_invoke_arn
+  lambda_function_name     = module.lambda_authorizer.lambda_function_name
+  traefik_node_port        = 30080
+  regional_certificate_arn = module.dns.regional_certificate_arn
+  domain_name              = var.domain_name
 
   depends_on = [module.eks]
 }
@@ -239,6 +257,17 @@ resource "aws_route53_record" "admin" {
   alias {
     name                   = module.frontend.distribution_domain_names["admin-console"]
     zone_id                = module.frontend.distribution_hosted_zone_ids["admin-console"]
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "api" {
+  zone_id = module.dns.hosted_zone_id
+  name    = "api.${var.domain_name}"
+  type    = "A"
+  alias {
+    name                   = module.api_gateway.api_custom_domain_regional_name
+    zone_id                = module.api_gateway.api_custom_domain_regional_zone_id
     evaluate_target_health = false
   }
 }

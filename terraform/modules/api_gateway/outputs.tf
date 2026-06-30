@@ -50,3 +50,18 @@ output "internal_api_key_secret_arn" {
   description = "Secrets Manager ARN for the internal API key value"
   value       = aws_secretsmanager_secret.internal_api_key.arn
 }
+
+output "api_custom_domain" {
+  description = "Custom domain name for API Gateway (e.g. api.dev.opsnexus.site)"
+  value       = aws_api_gateway_domain_name.api.domain_name
+}
+
+output "api_custom_domain_regional_name" {
+  description = "Regional DNS target for the API custom domain — use as Route53 alias target"
+  value       = aws_api_gateway_domain_name.api.regional_domain_name
+}
+
+output "api_custom_domain_regional_zone_id" {
+  description = "Hosted zone ID of the API custom domain — use for Route53 alias"
+  value       = aws_api_gateway_domain_name.api.regional_zone_id
+}

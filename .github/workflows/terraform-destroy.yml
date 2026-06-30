@@ -84,8 +84,6 @@ jobs:
 
       - name: Terraform Plan Destroy
         working-directory: terraform/environments/${{ github.event.inputs.environment }}
-        env:
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
         run: |
           terraform plan -destroy \
             -var-file="${{ github.event.inputs.environment }}.tfvars" \

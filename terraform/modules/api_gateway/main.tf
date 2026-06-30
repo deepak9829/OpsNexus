@@ -15,6 +15,11 @@
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
+locals {
+  env_prefix = var.environment != "prod" ? "${var.environment}." : ""
+  api_domain = "api.${local.env_prefix}${var.domain_name}"
+}
+
 # ─── Account-level: allow API Gateway to push logs to CloudWatch ──────────────
 # This is a regional account setting (one per region). Must be set before any
 # Stage resource enables logging_level, or UpdateStage returns 400.
@@ -399,6 +404,30 @@ resource "aws_secretsmanager_secret" "internal_api_key" {
 resource "aws_secretsmanager_secret_version" "internal_api_key" {
   secret_id     = aws_secretsmanager_secret.internal_api_key.id
   secret_string = aws_api_gateway_api_key.internal.value
+}
+
+################################################################################
+# Custom Domain — api.{env.}opsnexus.site
+################################################################################
+
+resource "aws_api_gateway_domain_name" "api" {
+  domain_name              = local.api_domain
+  regional_certificate_arn = var.regional_certificate_arn
+  security_policy          = "TLS_1_2"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = { Name = "${var.project_name}-${var.environment}-api-domain" }
+}
+
+# Maps the stage to the root path of the custom domain.
+# After this, api.dev.opsnexus.site/auth/* works the same as the execute-api URL.
+resource "aws_api_gateway_base_path_mapping" "api" {
+  api_id      = aws_api_gateway_rest_api.main.id
+  stage_name  = aws_api_gateway_stage.main.stage_name
+  domain_name = aws_api_gateway_domain_name.api.domain_name
 }
 
 ################################################################################

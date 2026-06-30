@@ -6,10 +6,9 @@ variable "environment" {
   type = string
 }
 
-variable "jwt_secret" {
+variable "jwt_secret_arn" {
   type        = string
-  sensitive   = true
-  description = "JWT signing secret"
+  description = "ARN of the JWT signing secret in AWS Secrets Manager"
 }
 
 variable "reserved_concurrent_executions" {
