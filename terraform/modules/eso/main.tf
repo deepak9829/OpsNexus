@@ -60,7 +60,7 @@ resource "helm_release" "eso" {
         "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn
       }
     }
-    webhook = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn } } }
+    webhook        = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn } } }
     certController = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn } } }
   })]
 }
