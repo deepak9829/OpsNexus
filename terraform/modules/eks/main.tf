@@ -90,13 +90,6 @@ resource "aws_security_group" "eks_nodes" {
     self        = true
   }
 
-  ingress {
-    description = "NLB health checks and Traefik traffic on NodePort 30080"
-    from_port   = 30080
-    to_port     = 30080
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
 
   egress {
     description = "All outbound"
@@ -107,6 +100,21 @@ resource "aws_security_group" "eks_nodes" {
   }
 
   tags = { Name = "${var.project_name}-${var.environment}-eks-nodes-sg" }
+}
+
+# Allow NLB health checks and traffic to reach Traefik on NodePort 30080.
+# Targets the EKS cluster security group (auto-created by EKS and attached to
+# all nodes) rather than the additional node SG, which is not auto-attached.
+resource "aws_security_group_rule" "traefik_nodeport" {
+  security_group_id = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+  type              = "ingress"
+  from_port         = 30080
+  to_port           = 30080
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  description       = "NLB → Traefik NodePort 30080"
+
+  depends_on = [aws_eks_cluster.main]
 }
 
 # ─── EKS Cluster ──────────────────────────────────────────────────────────
