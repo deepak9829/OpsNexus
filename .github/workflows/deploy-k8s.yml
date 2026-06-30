@@ -137,9 +137,6 @@ jobs:
             --wait \
             --timeout 5m
 
-      - name: Apply Traefik IngressRoutes
-        run: kubectl apply -f k8s/traefik/ingressroutes.yaml
-
       - name: Apply Karpenter NodeClass and NodePool
         env:
           PROJECT_NAME: opsnexus
@@ -175,6 +172,9 @@ jobs:
         run: |
           kubectl apply -k k8s/overlays/${{ needs.resolve.outputs.environment }} \
             --namespace opsnexus
+
+      - name: Apply Traefik IngressRoutes
+        run: kubectl apply -f k8s/traefik/ingressroutes.yaml
 
       - name: Wait for rollout
         run: |
