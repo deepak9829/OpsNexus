@@ -1,0 +1,51 @@
+## Traefik Helm values — OpsNexus
+##
+## Traffic flow:
+##   Internet → API Gateway → VPC Link → NLB:80 → Traefik NodePort 30080
+##   TLS terminates at API Gateway; traffic inside VPC is plain HTTP.
+
+deployment:
+  replicas: 2
+
+service:
+  type: NodePort
+
+ports:
+  web:
+    port: 8000
+    nodePort: 30080
+    expose:
+      default: true
+  websecure:
+    expose:
+      default: false  # TLS handled by API Gateway, not Traefik
+
+# Disable dashboard in non-local environments
+ingressRoute:
+  dashboard:
+    enabled: false
+
+providers:
+  kubernetesCRD:
+    enabled: true
+    namespaces: []
+  kubernetesIngress:
+    enabled: false
+
+# Disable default Let's Encrypt certificate resolver
+certResolvers: {}
+
+# Minimal logging
+logs:
+  general:
+    level: INFO
+  access:
+    enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi

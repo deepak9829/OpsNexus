@@ -126,6 +126,20 @@ jobs:
             --name ${{ needs.resolve.outputs.cluster_name }} \
             --region ${{ needs.resolve.outputs.aws_region }}
 
+      - name: Deploy Traefik ingress controller
+        run: |
+          helm repo add traefik https://helm.traefik.io/traefik --force-update
+          helm repo update
+          helm upgrade --install traefik traefik/traefik \
+            --namespace traefik \
+            --create-namespace \
+            --values k8s/traefik/values.yaml \
+            --wait \
+            --timeout 5m
+
+      - name: Apply Traefik IngressRoutes
+        run: kubectl apply -f k8s/traefik/ingressroutes.yaml
+
       - name: Apply Karpenter NodeClass and NodePool
         env:
           PROJECT_NAME: opsnexus

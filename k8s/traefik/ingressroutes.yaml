@@ -1,0 +1,43 @@
+---
+# Routes matching the API Gateway integration URIs:
+#   http://{nlb}/api/v1/{service}/{proxy}
+# API Gateway forwards X-User-Id, X-Tenant-Id, X-User-Roles headers from the
+# JWT authorizer context — services trust these as pre-validated identity.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: opsnexus-api
+  namespace: opsnexus
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/api/v1/auth`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8081
+
+    - match: PathPrefix(`/api/v1/tenants`)
+      kind: Rule
+      services:
+        - name: tenant-service
+          port: 8082
+
+    - match: PathPrefix(`/api/v1/cases`) || PathPrefix(`/api/v1/tasks`)
+      kind: Rule
+      services:
+        - name: workflow-service
+          port: 8083
+
+    - match: PathPrefix(`/api/v1/documents`)
+      kind: Rule
+      services:
+        - name: document-service
+          port: 8084
+
+    - match: PathPrefix(`/api/v1/notifications`)
+      kind: Rule
+      services:
+        - name: notification-service
+          port: 8085
