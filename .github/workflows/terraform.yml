@@ -157,6 +157,7 @@ jobs:
           set +e
           terraform plan \
             -var-file="${{ steps.cfg.outputs.tfvars_file }}" \
+            -var="aws_profile=" \
             -out=tfplan.binary \
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt
@@ -297,7 +298,8 @@ jobs:
       - name: Terraform Apply
         if: steps.download.outputs.found == 'true'
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
-        run: terraform apply -auto-approve tfplan.binary
+        run: |
+          terraform apply -auto-approve tfplan.binary
 
       - name: Summary
         run: |
