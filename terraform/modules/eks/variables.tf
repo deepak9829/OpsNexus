@@ -13,6 +13,11 @@ variable "vpc_id" {
   description = "VPC ID"
 }
 
+variable "vpc_cidr" {
+  type        = string
+  description = "VPC CIDR block — used to allow NLB health checks to reach Traefik NodePort"
+}
+
 variable "private_eks_subnet_ids" {
   type        = list(string)
   description = "Private subnet IDs for EKS nodes"

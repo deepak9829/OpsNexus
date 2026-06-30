@@ -90,6 +90,14 @@ resource "aws_security_group" "eks_nodes" {
     self        = true
   }
 
+  ingress {
+    description = "NLB health checks and Traefik traffic on NodePort 30080"
+    from_port   = 30080
+    to_port     = 30080
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   egress {
     description = "All outbound"
     from_port   = 0
