@@ -1,15 +1,26 @@
 name: Terraform
 
+# Trigger strategy — single main branch:
+#   pull_request → main : plan only, posts diff as PR comment
+#   push → main         : plan + apply (PR merge)
+#
+# Environment is derived from which folder changed:
+#   terraform/environments/dev/**  or terraform/modules/** → dev
+#   terraform/environments/staging/**                      → staging
+#   terraform/environments/prod/**                         → prod
+
 on:
   push:
-    branches: [develop, staging, main]
+    branches: [main]
     paths:
-      - 'terraform/**'
+      - 'terraform/environments/**'
+      - 'terraform/modules/**'
       - '.github/workflows/terraform.yml'
   pull_request:
-    branches: [develop, staging, main]
+    branches: [main]
     paths:
-      - 'terraform/**'
+      - 'terraform/environments/**'
+      - 'terraform/modules/**'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
@@ -19,7 +30,7 @@ on:
         type: choice
         options: [dev, staging, prod]
       action:
-        description: 'Action to perform'
+        description: 'Action'
         required: true
         type: choice
         options: [plan, apply]
@@ -39,41 +50,59 @@ jobs:
     name: Resolve environment
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.resolve.outputs.environment }}
-      aws_region: ${{ steps.resolve.outputs.aws_region }}
-      backend_file: ${{ steps.resolve.outputs.backend_file }}
-      tfvars_file: ${{ steps.resolve.outputs.tfvars_file }}
-      tf_dir: ${{ steps.resolve.outputs.tf_dir }}
+      environment:   ${{ steps.resolve.outputs.environment }}
+      aws_region:    ${{ steps.resolve.outputs.aws_region }}
+      backend_file:  ${{ steps.resolve.outputs.backend_file }}
+      tfvars_file:   ${{ steps.resolve.outputs.tfvars_file }}
+      tf_dir:        ${{ steps.resolve.outputs.tf_dir }}
     steps:
-      - name: Resolve branch to environment
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect environment from changed paths
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ENV="prod"
-          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
-            ENV="staging"
           else
-            ENV="dev"
+            # Diff against the base: PR base SHA or previous commit on push
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE="${{ github.event.pull_request.base.sha }}"
+            else
+              BASE="${{ github.event.before }}"
+            fi
+            CHANGED=$(git diff --name-only "${BASE}" "${{ github.sha }}" 2>/dev/null \
+                      || git diff --name-only HEAD~1 HEAD)
+
+            echo "Changed files:"
+            echo "$CHANGED"
+
+            if echo "$CHANGED" | grep -q "^terraform/environments/prod/"; then
+              ENV="prod"
+            elif echo "$CHANGED" | grep -q "^terraform/environments/staging/"; then
+              ENV="staging"
+            else
+              # dev folder, any module change, or workflow file → dev
+              ENV="dev"
+            fi
           fi
 
           case "${ENV}" in
             dev)     REGION="ap-south-1" ;;
             staging) REGION="ap-southeast-1" ;;
             prod)    REGION="ap-southeast-1" ;;
-            *)       REGION="ap-southeast-1" ;;
           esac
-          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
 
-          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+          echo "environment=${ENV}"                                  >> "$GITHUB_OUTPUT"
+          echo "aws_region=${REGION}"                                >> "$GITHUB_OUTPUT"
           echo "backend_file=../../../terraform/backends/${ENV}.hcl" >> "$GITHUB_OUTPUT"
-          echo "tfvars_file=${ENV}.tfvars" >> "$GITHUB_OUTPUT"
-          echo "tf_dir=terraform/environments/${ENV}" >> "$GITHUB_OUTPUT"
-          echo "Resolved to environment: ${ENV}"
+          echo "tfvars_file=${ENV}.tfvars"                           >> "$GITHUB_OUTPUT"
+          echo "tf_dir=terraform/environments/${ENV}"                >> "$GITHUB_OUTPUT"
+          echo "Resolved → environment: ${ENV}, region: ${REGION}"
 
   plan:
-    name: Terraform Plan (${{ needs.resolve.outputs.environment }})
+    name: Plan (${{ needs.resolve.outputs.environment }})
     runs-on: ubuntu-latest
     needs: resolve
     environment: ${{ needs.resolve.outputs.environment }}-plan
@@ -86,10 +115,9 @@ jobs:
       plan_changed: ${{ steps.plan.outputs.plan_changed }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -131,11 +159,11 @@ jobs:
 
           if [ $EXIT_CODE -eq 0 ]; then
             echo "plan_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
           elif [ $EXIT_CODE -eq 2 ]; then
             echo "plan_changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "Terraform plan failed" >&2
-            cat plan_output.txt >&2
             exit 1
           fi
 
@@ -150,7 +178,7 @@ jobs:
           aws s3 cp tfplan.json \
             s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.json
 
-      - name: Checkov scan
+      - name: Checkov security scan
         if: steps.plan.outputs.plan_changed == 'true'
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -168,7 +196,7 @@ jobs:
           sarif_file: checkov-results.sarif
         continue-on-error: true
 
-      - name: Comment PR with plan
+      - name: Comment plan on PR
         if: github.event_name == 'pull_request' && steps.plan.outputs.plan_changed == 'true'
         uses: actions/github-script@v7
         with:
@@ -176,22 +204,34 @@ jobs:
             const fs = require('fs');
             const plan = fs.readFileSync('${{ needs.resolve.outputs.tf_dir }}/plan_output.txt', 'utf8');
             const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...truncated' : plan;
-            const body = `## Terraform Plan — \`${{ needs.resolve.outputs.environment }}\`\n\n<details><summary>Show Plan</summary>\n\n\`\`\`hcl\n${truncated}\n\`\`\`\n</details>\n\n*Run ID: ${{ github.run_id }} | Plan stored in S3*`;
+            const body = [
+              `## Terraform Plan — \`${{ needs.resolve.outputs.environment }}\``,
+              '',
+              '<details><summary>Show Plan</summary>',
+              '',
+              '```hcl',
+              truncated,
+              '```',
+              '</details>',
+              '',
+              `*Run: ${{ github.run_id }} | Plan stored in S3 — will auto-apply on merge*`,
+            ].join('\n');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
+              body,
             });
 
   apply:
-    name: Terraform Apply (${{ needs.resolve.outputs.environment }})
+    name: Apply (${{ needs.resolve.outputs.environment }})
     runs-on: ubuntu-latest
     needs: [resolve, plan]
+    # Only apply on push to main (PR merge) or manual workflow_dispatch apply
     if: |
       needs.plan.outputs.plan_changed == 'true' &&
       (
-        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop')) ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
       )
     environment: ${{ needs.resolve.outputs.environment }}-deploy
@@ -200,10 +240,9 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -232,3 +271,9 @@ jobs:
       - name: Terraform Apply
         working-directory: ${{ needs.resolve.outputs.tf_dir }}
         run: terraform apply -auto-approve tfplan.binary
+
+      - name: Summary
+        run: |
+          echo "### Terraform Apply Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "Environment: \`${{ needs.resolve.outputs.environment }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
