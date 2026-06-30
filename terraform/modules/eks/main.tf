@@ -112,7 +112,7 @@ resource "aws_security_group_rule" "traefik_nodeport" {
   to_port           = 30080
   protocol          = "tcp"
   cidr_blocks       = [var.vpc_cidr]
-  description       = "NLB → Traefik NodePort 30080"
+  description       = "NLB to Traefik NodePort 30080"
 
   depends_on = [aws_eks_cluster.main]
 }
