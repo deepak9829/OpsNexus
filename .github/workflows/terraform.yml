@@ -154,7 +154,7 @@ jobs:
         id: plan
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
-          set +e
+          set +o pipefail
           terraform plan \
             -var-file="${{ steps.cfg.outputs.tfvars_file }}" \
             -var="aws_profile=" \
@@ -162,21 +162,26 @@ jobs:
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
-          set -e
+          echo "Terraform exit code: ${EXIT_CODE}"
 
-          if [ $EXIT_CODE -eq 0 ]; then
+          if [ "${EXIT_CODE}" -eq 0 ]; then
             echo "plan_changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes detected."
-          elif [ $EXIT_CODE -eq 2 ]; then
+          elif [ "${EXIT_CODE}" -eq 2 ]; then
             echo "plan_changed=true" >> "$GITHUB_OUTPUT"
-            aws s3 cp tfplan.binary \
-              s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.tfplan
-            aws s3 cp plan_output.txt \
-              s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.txt
           else
-            echo "Terraform plan failed" >&2
+            echo "Terraform plan failed with exit code ${EXIT_CODE}" >&2
             exit 1
           fi
+
+      - name: Upload plan to S3
+        if: steps.plan.outputs.plan_changed == 'true'
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
+        run: |
+          aws s3 cp tfplan.binary \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.tfplan
+          aws s3 cp plan_output.txt \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.txt
+          echo "Plan uploaded to S3 for run ${{ github.run_id }}"
 
       - name: Checkov security scan
         if: steps.plan.outputs.plan_changed == 'true'
