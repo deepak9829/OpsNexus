@@ -32,16 +32,6 @@ providers:
   kubernetesIngress:
     enabled: false
 
-# Disable default Let's Encrypt certificate resolver
-certResolvers: {}
-
-# Minimal logging
-logs:
-  general:
-    level: INFO
-  access:
-    enabled: true
-
 resources:
   requests:
     cpu: 100m
