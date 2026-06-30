@@ -136,6 +136,11 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
+      - name: Package Lambda authorizer
+        run: |
+          zip -j terraform/modules/lambda_authorizer/function/authorizer.zip \
+              terraform/modules/lambda_authorizer/function/index.js
+
       - name: Terraform Init
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
@@ -280,6 +285,11 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
+
+      - name: Package Lambda authorizer
+        run: |
+          zip -j terraform/modules/lambda_authorizer/function/authorizer.zip \
+              terraform/modules/lambda_authorizer/function/index.js
 
       - name: Terraform Init
         working-directory: ${{ steps.cfg.outputs.tf_dir }}

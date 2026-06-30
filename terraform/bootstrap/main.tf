@@ -169,10 +169,15 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "*"
       },
       {
-        Sid      = "SSMParameterAccess"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-        Resource = "arn:aws:ssm:ap-southeast-1:${data.aws_caller_identity.current.account_id}:parameter/opsnexus/*"
+        Sid    = "SSMParameterAccess"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath",
+          "ssm:PutParameter", "ssm:DeleteParameter", "ssm:DeleteParameters",
+          "ssm:DescribeParameters", "ssm:GetParameterHistory",
+          "ssm:AddTagsToResource", "ssm:ListTagsForResource",
+        ]
+        Resource = "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/opsnexus/*"
       },
       {
         Sid      = "CloudFrontInvalidation"
@@ -181,9 +186,9 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "*"
       },
       {
-        Sid    = "S3FrontendDeploy"
+        Sid    = "S3BucketManagement"
         Effect = "Allow"
-        Action = ["s3:PutObject", "s3:DeleteObject", "s3:GetObject", "s3:ListBucket"]
+        Action = ["s3:*"]
         Resource = [
           "arn:aws:s3:::opsnexus-*",
           "arn:aws:s3:::opsnexus-*/*",
