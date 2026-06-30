@@ -134,6 +134,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Terraform Format Check
@@ -259,6 +260,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Download plan from S3
