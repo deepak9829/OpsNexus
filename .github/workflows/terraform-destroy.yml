@@ -74,6 +74,12 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Package Lambda authorizer
+        run: |
+          zip -j terraform/modules/lambda_authorizer/function/authorizer.zip \
+              terraform/modules/lambda_authorizer/function/index.js
 
       - name: Terraform Init
         working-directory: terraform/environments/${{ github.event.inputs.environment }}
@@ -88,6 +94,7 @@ jobs:
         run: |
           terraform plan -destroy \
             -var-file="${{ github.event.inputs.environment }}.tfvars" \
+            -var="aws_profile=" \
             -out=destroy-plan.binary \
             -no-color 2>&1 | tee destroy-plan-output.txt
 
@@ -123,6 +130,12 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Package Lambda authorizer
+        run: |
+          zip -j terraform/modules/lambda_authorizer/function/authorizer.zip \
+              terraform/modules/lambda_authorizer/function/index.js
 
       - name: Terraform Init
         working-directory: terraform/environments/${{ github.event.inputs.environment }}
