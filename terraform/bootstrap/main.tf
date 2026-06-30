@@ -186,6 +186,14 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "*"
       },
       {
+        # s3:ListAllMyBuckets (used by data.aws_canonical_user_id) requires Resource = "*"
+        # bucket-scoped s3:* does not cover service-level list actions
+        Sid      = "S3ServiceLevelActions"
+        Effect   = "Allow"
+        Action   = ["s3:ListAllMyBuckets", "s3:GetAccountPublicAccessBlock"]
+        Resource = "*"
+      },
+      {
         Sid      = "CloudFrontInvalidation"
         Effect   = "Allow"
         Action   = ["cloudfront:CreateInvalidation"]
