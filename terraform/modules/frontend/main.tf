@@ -118,8 +118,8 @@ resource "aws_cloudfront_distribution" "app" {
   comment             = "${var.project_name}-${var.environment}-${each.key}"
 
   origin {
-    domain_name              = aws_s3_bucket.content.bucket_regional_domain_name
-    origin_id                = "s3-${each.key}"
+    domain_name = aws_s3_bucket.content.bucket_regional_domain_name
+    origin_id   = "s3-${each.key}"
     # Routes this distribution to its folder in the shared bucket.
     # CloudFront prepends this to every S3 request path automatically.
     origin_path              = "/${each.key}"

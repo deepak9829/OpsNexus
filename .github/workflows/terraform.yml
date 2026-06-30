@@ -1,15 +1,27 @@
 name: Terraform
 
+# Trigger strategy — single main branch:
+#   pull_request → main : plan only, posts diff as PR comment
+#   push → main         : plan + apply (PR merge)
+#
+# Environment matrix is derived from which folders changed:
+#   terraform/environments/dev/**  or terraform/modules/** → dev
+#   terraform/environments/staging/**                      → staging
+#   terraform/environments/prod/**                         → prod
+# All detected environments run in parallel as a matrix.
+
 on:
   push:
-    branches: [develop, staging, main]
+    branches: [main]
     paths:
-      - 'terraform/**'
+      - 'terraform/environments/**'
+      - 'terraform/modules/**'
       - '.github/workflows/terraform.yml'
   pull_request:
-    branches: [develop, staging, main]
+    branches: [main]
     paths:
-      - 'terraform/**'
+      - 'terraform/environments/**'
+      - 'terraform/modules/**'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
@@ -19,14 +31,10 @@ on:
         type: choice
         options: [dev, staging, prod]
       action:
-        description: 'Action to perform'
+        description: 'Action'
         required: true
         type: choice
         options: [plan, apply]
-
-concurrency:
-  group: terraform-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TF_VERSION: '1.10.0'
@@ -36,65 +44,91 @@ env:
 
 jobs:
   resolve:
-    name: Resolve environment
+    name: Resolve environments
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.resolve.outputs.environment }}
-      aws_region: ${{ steps.resolve.outputs.aws_region }}
-      backend_file: ${{ steps.resolve.outputs.backend_file }}
-      tfvars_file: ${{ steps.resolve.outputs.tfvars_file }}
-      tf_dir: ${{ steps.resolve.outputs.tf_dir }}
+      environments: ${{ steps.resolve.outputs.environments }}
     steps:
-      - name: Resolve branch to environment
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed environments
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ENV="prod"
-          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
-            ENV="staging"
+            ENVS='["${{ github.event.inputs.environment }}"]'
           else
-            ENV="dev"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE="${{ github.event.pull_request.base.sha }}"
+            else
+              BASE="${{ github.event.before }}"
+            fi
+            CHANGED=$(git diff --name-only "${BASE}" "${{ github.sha }}" 2>/dev/null \
+                      || git diff --name-only HEAD~1 HEAD)
+
+            echo "Changed files:"
+            echo "$CHANGED"
+
+            ENVS="[]"
+            if echo "$CHANGED" | grep -qE "^terraform/environments/dev/|^terraform/modules/|^\.github/workflows/terraform\.yml"; then
+              ENVS=$(echo "$ENVS" | jq -c '. + ["dev"]')
+            fi
+            if echo "$CHANGED" | grep -q "^terraform/environments/staging/"; then
+              ENVS=$(echo "$ENVS" | jq -c '. + ["staging"]')
+            fi
+            if echo "$CHANGED" | grep -q "^terraform/environments/prod/"; then
+              ENVS=$(echo "$ENVS" | jq -c '. + ["prod"]')
+            fi
+            # Default to dev if nothing matched (e.g. workflow file only)
+            if [ "$ENVS" = "[]" ]; then
+              ENVS='["dev"]'
+            fi
           fi
 
-          case "${ENV}" in
-            dev)     REGION="ap-south-1" ;;
-            staging) REGION="ap-southeast-1" ;;
-            prod)    REGION="ap-southeast-1" ;;
-            *)       REGION="ap-southeast-1" ;;
-          esac
-          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
-
-          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
-          echo "backend_file=../../../terraform/backends/${ENV}.hcl" >> "$GITHUB_OUTPUT"
-          echo "tfvars_file=${ENV}.tfvars" >> "$GITHUB_OUTPUT"
-          echo "tf_dir=terraform/environments/${ENV}" >> "$GITHUB_OUTPUT"
-          echo "Resolved to environment: ${ENV}"
+          echo "Detected environments: ${ENVS}"
+          echo "environments=${ENVS}" >> "$GITHUB_OUTPUT"
 
   plan:
-    name: Terraform Plan (${{ needs.resolve.outputs.environment }})
+    name: Plan (${{ matrix.environment }})
     runs-on: ubuntu-latest
     needs: resolve
-    environment: ${{ needs.resolve.outputs.environment }}-plan
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.resolve.outputs.environments) }}
+    environment: ${{ matrix.environment }}-plan
+    concurrency:
+      group: terraform-${{ github.ref }}-${{ matrix.environment }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       id-token: write
       contents: read
       pull-requests: write
       security-events: write
-    outputs:
-      plan_changed: ${{ steps.plan.outputs.plan_changed }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Resolve environment config
+        id: cfg
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}"                                                    >> "$GITHUB_OUTPUT"
+          echo "backend_file=../../../terraform/backends/${{ matrix.environment }}.hcl" >> "$GITHUB_OUTPUT"
+          echo "tfvars_file=${{ matrix.environment }}.tfvars"                           >> "$GITHUB_OUTPUT"
+          echo "tf_dir=terraform/environments/${{ matrix.environment }}"                >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ needs.resolve.outputs.aws_region }}
-          role-session-name: GHATerraformPlan-${{ github.run_id }}
+          aws-region: ${{ steps.cfg.outputs.aws_region }}
+          role-session-name: GHATerraformPlan-${{ github.run_id }}-${{ matrix.environment }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -102,27 +136,27 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
           terraform init \
-            -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -backend-config="${{ steps.cfg.outputs.backend_file }}" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Terraform Format Check
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive terraform/
 
       - name: Terraform Validate
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: terraform validate
 
       - name: Terraform Plan
         id: plan
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
           set +e
           terraform plan \
-            -var-file="${{ needs.resolve.outputs.tfvars_file }}" \
+            -var-file="${{ steps.cfg.outputs.tfvars_file }}" \
             -out=tfplan.binary \
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt
@@ -131,30 +165,23 @@ jobs:
 
           if [ $EXIT_CODE -eq 0 ]; then
             echo "plan_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
           elif [ $EXIT_CODE -eq 2 ]; then
             echo "plan_changed=true" >> "$GITHUB_OUTPUT"
+            aws s3 cp tfplan.binary \
+              s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.tfplan
+            aws s3 cp plan_output.txt \
+              s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.txt
           else
             echo "Terraform plan failed" >&2
-            cat plan_output.txt >&2
             exit 1
           fi
 
-          terraform show -json tfplan.binary > tfplan.json
-
-      - name: Upload plan to S3
-        if: steps.plan.outputs.plan_changed == 'true'
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
-        run: |
-          aws s3 cp tfplan.binary \
-            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.tfplan
-          aws s3 cp tfplan.json \
-            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.json
-
-      - name: Checkov scan
+      - name: Checkov security scan
         if: steps.plan.outputs.plan_changed == 'true'
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: ${{ needs.resolve.outputs.tf_dir }}
+          directory: ${{ steps.cfg.outputs.tf_dir }}
           config_file: terraform/.checkov.yaml
           output_format: sarif
           output_file_path: checkov-results.sarif
@@ -168,47 +195,78 @@ jobs:
           sarif_file: checkov-results.sarif
         continue-on-error: true
 
-      - name: Comment PR with plan
+      - name: Comment plan on PR
         if: github.event_name == 'pull_request' && steps.plan.outputs.plan_changed == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('${{ needs.resolve.outputs.tf_dir }}/plan_output.txt', 'utf8');
+            const plan = fs.readFileSync('${{ steps.cfg.outputs.tf_dir }}/plan_output.txt', 'utf8');
             const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...truncated' : plan;
-            const body = `## Terraform Plan — \`${{ needs.resolve.outputs.environment }}\`\n\n<details><summary>Show Plan</summary>\n\n\`\`\`hcl\n${truncated}\n\`\`\`\n</details>\n\n*Run ID: ${{ github.run_id }} | Plan stored in S3*`;
+            const body = [
+              `## Terraform Plan — \`${{ matrix.environment }}\``,
+              '',
+              '<details><summary>Show Plan</summary>',
+              '',
+              '```hcl',
+              truncated,
+              '```',
+              '</details>',
+              '',
+              `*Run: ${{ github.run_id }} | Plan stored in S3 — will auto-apply on merge*`,
+            ].join('\n');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
+              body,
             });
 
   apply:
-    name: Terraform Apply (${{ needs.resolve.outputs.environment }})
+    name: Apply (${{ matrix.environment }})
     runs-on: ubuntu-latest
     needs: [resolve, plan]
+    # Only apply on push to main (PR merge) or manual workflow_dispatch apply.
+    # fail-fast:false in plan means plan.result is 'success' only when ALL envs planned OK.
     if: |
-      needs.plan.outputs.plan_changed == 'true' &&
+      needs.plan.result == 'success' &&
       (
-        (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop')) ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
       )
-    environment: ${{ needs.resolve.outputs.environment }}-deploy
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.resolve.outputs.environments) }}
+    environment: ${{ matrix.environment }}-deploy
+    concurrency:
+      group: terraform-apply-${{ github.ref }}-${{ matrix.environment }}
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Resolve environment config
+        id: cfg
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)     REGION="ap-south-1" ;;
+            staging) REGION="ap-southeast-1" ;;
+            prod)    REGION="ap-southeast-1" ;;
+          esac
+          echo "aws_region=${REGION}"                                                    >> "$GITHUB_OUTPUT"
+          echo "backend_file=../../../terraform/backends/${{ matrix.environment }}.hcl" >> "$GITHUB_OUTPUT"
+          echo "tf_dir=terraform/environments/${{ matrix.environment }}"                >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ needs.resolve.outputs.aws_region }}
-          role-session-name: GHATerraformApply-${{ github.run_id }}
+          aws-region: ${{ steps.cfg.outputs.aws_region }}
+          role-session-name: GHATerraformApply-${{ github.run_id }}-${{ matrix.environment }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -216,19 +274,37 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
           terraform init \
-            -backend-config="${{ needs.resolve.outputs.backend_file }}" \
+            -backend-config="${{ steps.cfg.outputs.backend_file }}" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Download plan from S3
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        id: download
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
-          aws s3 cp \
-            s3://${{ env.STATE_BUCKET }}/plans/${{ needs.resolve.outputs.environment }}/run-${{ github.run_id }}.tfplan \
-            tfplan.binary
+          if aws s3 cp \
+            s3://${{ env.STATE_BUCKET }}/plans/${{ matrix.environment }}/run-${{ github.run_id }}.tfplan \
+            tfplan.binary 2>/dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No plan found for ${{ matrix.environment }} — no changes to apply"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Terraform Apply
-        working-directory: ${{ needs.resolve.outputs.tf_dir }}
+        if: steps.download.outputs.found == 'true'
+        working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: terraform apply -auto-approve tfplan.binary
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.download.outputs.found }}" = "true" ]; then
+            echo "### Terraform Apply Complete" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### No Changes — Skipped" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Environment: \`${{ matrix.environment }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,10 +1,25 @@
 name: Deploy to EKS
 
+# Trigger strategy — single main branch:
+#   workflow_run  : fires automatically after build-push succeeds on main
+#   push → main   : fires when k8s manifest files change (no image rebuild needed)
+#   workflow_dispatch : manual deploy with optional image tag override
+#
+# Environment is derived from which k8s overlay folder changed:
+#   k8s/overlays/dev/**  or k8s/base/** or k8s/external-secrets/** → dev
+#   k8s/overlays/staging/**                                         → staging
+#   k8s/overlays/prod/**                                            → prod
+
 on:
   workflow_run:
     workflows: ["Build & Push Images"]
     types: [completed]
-    branches: [develop, staging, main]
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/deploy-k8s.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -13,55 +28,74 @@ on:
         type: choice
         options: [dev, staging, prod]
       image_tag:
-        description: 'Image tag to deploy (default: commit SHA)'
+        description: 'Image tag to deploy (default: latest commit SHA)'
         required: false
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-eks-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  KUSTOMIZE_DIR: 'k8s/overlays'
 
 jobs:
   resolve:
     name: Resolve environment
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
     outputs:
-      environment: ${{ steps.resolve.outputs.environment }}
-      aws_region: ${{ steps.resolve.outputs.aws_region }}
-      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      environment:  ${{ steps.resolve.outputs.environment }}
+      aws_region:   ${{ steps.resolve.outputs.aws_region }}
+      image_tag:    ${{ steps.resolve.outputs.image_tag }}
       cluster_name: ${{ steps.resolve.outputs.cluster_name }}
     steps:
-      - name: Resolve environment and image tag
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect environment and image tag
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             ENV="${{ github.event.inputs.environment }}"
             TAG="${{ github.event.inputs.image_tag || github.sha }}"
-          elif [ "${{ github.event.workflow_run.head_branch }}" = "main" ]; then
-            ENV="prod"
-            TAG="${{ github.event.workflow_run.head_sha }}"
-          elif [ "${{ github.event.workflow_run.head_branch }}" = "staging" ]; then
-            ENV="staging"
-            TAG="${{ github.event.workflow_run.head_sha }}"
-          else
+
+          elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # Triggered by build-push — always dev (main branch = dev)
             ENV="dev"
             TAG="${{ github.event.workflow_run.head_sha }}"
+
+          else
+            # push event: detect from which k8s overlay changed
+            BASE="${{ github.event.before }}"
+            CHANGED=$(git diff --name-only "${BASE}" "${{ github.sha }}" 2>/dev/null \
+                      || git diff --name-only HEAD~1 HEAD)
+
+            echo "Changed files:"
+            echo "$CHANGED"
+
+            if echo "$CHANGED" | grep -q "^k8s/overlays/prod/"; then
+              ENV="prod"
+            elif echo "$CHANGED" | grep -q "^k8s/overlays/staging/"; then
+              ENV="staging"
+            else
+              # base/, external-secrets/, karpenter/, or dev overlay → dev
+              ENV="dev"
+            fi
+            TAG="${{ github.sha }}"
           fi
 
           case "${ENV}" in
             dev)     REGION="ap-south-1" ;;
             staging) REGION="ap-southeast-1" ;;
             prod)    REGION="ap-southeast-1" ;;
-            *)       REGION="ap-southeast-1" ;;
           esac
-          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
 
-          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
-          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "environment=${ENV}"             >> "$GITHUB_OUTPUT"
+          echo "aws_region=${REGION}"           >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TAG}"               >> "$GITHUB_OUTPUT"
           echo "cluster_name=opsnexus-${ENV}-eks" >> "$GITHUB_OUTPUT"
+          echo "Resolved → environment: ${ENV}, tag: ${TAG}"
 
   deploy:
     name: Deploy to EKS (${{ needs.resolve.outputs.environment }})
@@ -73,10 +107,9 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -117,12 +150,11 @@ jobs:
       - name: Update image tags in kustomize overlay
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
         run: |
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          ECR="${{ steps.login-ecr.outputs.registry }}"
           TAG="${{ needs.resolve.outputs.image_tag }}"
 
-          for SERVICE in auth-service tenant-service workflow-service document-service notification-service; do
-            kustomize edit set image \
-              "opsnexus/${SERVICE}=${ECR_REGISTRY}/opsnexus/${SERVICE}:${TAG}"
+          for SVC in auth-service tenant-service workflow-service document-service notification-service; do
+            kustomize edit set image "opsnexus/${SVC}=${ECR}/opsnexus/${SVC}:${TAG}"
           done
 
       - name: Apply Kustomize overlay
@@ -145,7 +177,11 @@ jobs:
 
       - name: Rollback on failure
         if: failure()
+        run: kubectl rollout undo deployment --namespace opsnexus || true
+
+      - name: Summary
         run: |
-          echo "Deployment failed — rolling back all deployments"
-          kubectl rollout undo deployment \
-            --namespace opsnexus || true
+          echo "### Deployed to EKS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Environment: \`${{ needs.resolve.outputs.environment }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image tag: \`${{ needs.resolve.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cluster: \`${{ needs.resolve.outputs.cluster_name }}\`" >> "$GITHUB_STEP_SUMMARY"

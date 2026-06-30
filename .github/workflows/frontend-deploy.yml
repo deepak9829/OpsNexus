@@ -22,7 +22,7 @@ on:
         default: all
 
 concurrency:
-  group: frontend-${{ matrix.app }}
+  group: frontend-${{ github.ref }}
   cancel-in-progress: true
 
 env:

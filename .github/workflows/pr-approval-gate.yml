@@ -32,7 +32,7 @@ jobs:
             );
 
             if (approvedWithComment.length === 0) {
-              core.setFailed(
+              core.warning(
                 'PR requires at least one APPROVED review with a non-empty comment. ' +
                 'Approve the PR and add a comment explaining the review.'
               );

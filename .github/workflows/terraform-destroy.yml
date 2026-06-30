@@ -80,6 +80,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../../../terraform/backends/${{ github.event.inputs.environment }}.hcl" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Terraform Plan Destroy
@@ -128,6 +129,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../../../terraform/backends/${{ github.event.inputs.environment }}.hcl" \
+            -backend-config="profile=" \
             -reconfigure
 
       - name: Download destroy plan from S3

@@ -155,7 +155,7 @@ locals {
     auth = {
       path         = "auth"
       backend_port = 8081
-      public       = true  # login / register / refresh — no JWT, no API key
+      public       = true # login / register / refresh — no JWT, no API key
     }
     tenants = {
       path         = "tenants"
@@ -225,7 +225,7 @@ resource "aws_api_gateway_integration" "proxy_any" {
   uri = "http://${aws_lb.nlb.dns_name}/api/v1/${each.value.path}/{proxy}"
 
   request_parameters = {
-    "integration.request.path.proxy"          = "method.request.path.proxy"
+    "integration.request.path.proxy" = "method.request.path.proxy"
     # Forward authorizer context as trusted internal headers
     "integration.request.header.X-User-Id"    = "context.authorizer.userId"
     "integration.request.header.X-Tenant-Id"  = "context.authorizer.tenantId"
@@ -266,22 +266,22 @@ resource "aws_api_gateway_stage" "main" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_gw.arn
     format = jsonencode({
-      requestId           = "$context.requestId"
-      ip                  = "$context.identity.sourceIp"
-      requestTime         = "$context.requestTime"
-      httpMethod          = "$context.httpMethod"
-      resourcePath        = "$context.resourcePath"
-      status              = "$context.status"
-      responseLength      = "$context.responseLength"
-      protocol            = "$context.protocol"
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      responseLength = "$context.responseLength"
+      protocol       = "$context.protocol"
       # SaaS billing / audit fields
-      apiKeyId            = "$context.identity.apiKeyId"
-      tenantId            = "$context.authorizer.tenantId"
-      userId              = "$context.authorizer.userId"
+      apiKeyId = "$context.identity.apiKeyId"
+      tenantId = "$context.authorizer.tenantId"
+      userId   = "$context.authorizer.userId"
       # Diagnostics
-      integrationError    = "$context.integration.error"
-      integrationStatus   = "$context.integration.integrationStatus"
-      authorizerError     = "$context.authorizer.error"
+      integrationError  = "$context.integration.error"
+      integrationStatus = "$context.integration.integrationStatus"
+      authorizerError   = "$context.authorizer.error"
     })
   }
 

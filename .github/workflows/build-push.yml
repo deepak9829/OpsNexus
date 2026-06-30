@@ -1,101 +1,121 @@
 name: Build & Push Images
 
+# Trigger strategy — single main branch:
+#   push → main with services/** changes → build all changed services → push to dev ECR
+#   PR   → main with services/** changes → build only (no push) for validation
+#
+# Images are environment-agnostic (tagged with SHA). The deploy-k8s workflow
+# picks up the image SHA and rolls it out to the target environment.
+
 on:
   push:
-    branches: [develop, staging, main]
+    branches: [main]
+    paths:
+      - 'services/**'
+      - '.github/workflows/build-push.yml'
+  pull_request:
+    branches: [main]
     paths:
       - 'services/**'
       - '.github/workflows/build-push.yml'
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        type: choice
-        options: [dev, staging, prod]
       services:
-        description: 'Comma-separated services (or "all")'
+        description: 'Services to build (comma-separated or "all")'
         required: false
         default: 'all'
 
 concurrency:
-  group: build-${{ github.ref }}-${{ matrix.service }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  ECR_REGISTRY_ALIAS: 'opsnexus'
+  AWS_REGION: 'ap-south-1'
 
 jobs:
   resolve:
-    name: Resolve environment
+    name: Resolve services matrix
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.resolve.outputs.environment }}
-      aws_region: ${{ steps.resolve.outputs.aws_region }}
-      aws_account_id: ${{ steps.resolve.outputs.aws_account_id }}
+      matrix:     ${{ steps.resolve.outputs.matrix }}
+      push_image: ${{ steps.resolve.outputs.push_image }}
     steps:
-      - name: Resolve branch to environment
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Build services matrix from changed paths
         id: resolve
         run: |
+          ALL_SERVICES='["auth-service","tenant-service","workflow-service","document-service","notification-service"]'
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ENV="prod"
-          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
-            ENV="staging"
+            INPUT="${{ github.event.inputs.services }}"
+            if [ "${INPUT}" = "all" ] || [ -z "${INPUT}" ]; then
+              MATRIX="${ALL_SERVICES}"
+            else
+              # Convert comma-separated input to JSON array
+              MATRIX=$(echo "${INPUT}" | tr ',' '\n' | jq -Rc '[.]' | jq -cs 'add')
+            fi
+            PUSH="true"
           else
-            ENV="dev"
+            # Detect changed services via git diff
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE="${{ github.event.pull_request.base.sha }}"
+            else
+              BASE="${{ github.event.before }}"
+            fi
+            CHANGED=$(git diff --name-only "${BASE}" "${{ github.sha }}" 2>/dev/null \
+                      || git diff --name-only HEAD~1 HEAD)
+
+            echo "Changed files:"
+            echo "$CHANGED"
+
+            SERVICES=()
+            for SVC in auth-service tenant-service workflow-service document-service notification-service; do
+              if echo "$CHANGED" | grep -q "^services/${SVC}/\|^\.github/workflows/build-push\.yml"; then
+                SERVICES+=("\"${SVC}\"")
+              fi
+            done
+
+            # If workflow file changed, build all services
+            if echo "$CHANGED" | grep -q "^\.github/workflows/build-push\.yml"; then
+              MATRIX="${ALL_SERVICES}"
+            elif [ ${#SERVICES[@]} -eq 0 ]; then
+              MATRIX="${ALL_SERVICES}"
+            else
+              MATRIX="[$(IFS=','; echo "${SERVICES[*]}")]"
+            fi
+
+            # Push only on merge to main, not on PR
+            [ "${{ github.event_name }}" = "push" ] && PUSH="true" || PUSH="false"
           fi
-          case "${ENV}" in
-            dev)     REGION="ap-south-1" ;;
-            staging) REGION="ap-southeast-1" ;;
-            prod)    REGION="ap-southeast-1" ;;
-            *)       REGION="ap-southeast-1" ;;
-          esac
-          echo "aws_region=${REGION}" >> "$GITHUB_OUTPUT"
 
-          echo "environment=${ENV}" >> "$GITHUB_OUTPUT"
+          echo "matrix=${MATRIX}"   >> "$GITHUB_OUTPUT"
+          echo "push_image=${PUSH}" >> "$GITHUB_OUTPUT"
+          echo "Building: ${MATRIX} | Push: ${PUSH}"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ steps.resolve.outputs.aws_region }}
-          role-session-name: GHAResolve-${{ github.run_id }}
-
-      - name: Get AWS account ID
-        id: account
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "aws_account_id=${ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
-
-  build-push:
-    name: Build ${{ matrix.service }}
+  build:
+    name: ${{ matrix.service }} (${{ needs.resolve.outputs.push_image == 'true' && 'build+push' || 'build only' }})
     runs-on: ubuntu-latest
     needs: resolve
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - auth-service
-          - tenant-service
-          - workflow-service
-          - document-service
-          - notification-service
+        service: ${{ fromJson(needs.resolve.outputs.matrix) }}
     permissions:
       id-token: write
       contents: read
       security-events: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ needs.resolve.outputs.aws_region }}
+          aws-region: ${{ env.AWS_REGION }}
           role-session-name: GHABuild-${{ matrix.service }}-${{ github.run_id }}
 
       - name: Login to Amazon ECR
@@ -109,30 +129,27 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: image=moby/buildkit:latest
 
       - name: Set image metadata
         id: meta
         run: |
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          IMAGE_BASE="${ECR_REGISTRY}/opsnexus/${{ matrix.service }}"
-          echo "image_base=${IMAGE_BASE}" >> "$GITHUB_OUTPUT"
-          echo "image_sha=${IMAGE_BASE}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "image_latest=${IMAGE_BASE}:latest" >> "$GITHUB_OUTPUT"
-          echo "image_env=${IMAGE_BASE}:${{ needs.resolve.outputs.environment }}" >> "$GITHUB_OUTPUT"
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          BASE="${REGISTRY}/opsnexus/${{ matrix.service }}"
+          echo "image_sha=${BASE}:${{ github.sha }}"     >> "$GITHUB_OUTPUT"
+          echo "image_latest=${BASE}:latest"             >> "$GITHUB_OUTPUT"
+          echo "image_dev=${BASE}:dev"                   >> "$GITHUB_OUTPUT"
 
-      - name: Build and push multi-arch image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: services/${{ matrix.service }}
           file: services/${{ matrix.service }}/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ needs.resolve.outputs.push_image == 'true' }}
           tags: |
             ${{ steps.meta.outputs.image_sha }}
             ${{ steps.meta.outputs.image_latest }}
-            ${{ steps.meta.outputs.image_env }}
+            ${{ steps.meta.outputs.image_dev }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
           build-args: |
@@ -140,6 +157,7 @@ jobs:
             GIT_COMMIT=${{ github.sha }}
 
       - name: Scan image with Trivy
+        if: needs.resolve.outputs.push_image == 'true'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.meta.outputs.image_sha }}
@@ -149,11 +167,15 @@ jobs:
         continue-on-error: true
 
       - name: Upload Trivy SARIF
+        if: needs.resolve.outputs.push_image == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif
           category: trivy-${{ matrix.service }}
         continue-on-error: true
 
-      - name: Output image URI
-        run: echo "Pushed ${{ steps.meta.outputs.image_sha }}"
+      - name: Summary
+        if: needs.resolve.outputs.push_image == 'true'
+        run: |
+          echo "### Pushed: ${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image: \`${{ steps.meta.outputs.image_sha }}\`" >> "$GITHUB_STEP_SUMMARY"

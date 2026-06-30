@@ -146,11 +146,11 @@ resource "aws_db_instance" "mysql" {
   final_snapshot_identifier = var.skip_final_snapshot ? null : "${var.project_name}-${var.environment}-mysql-final-snapshot"
 
   # Features
-  enabled_cloudwatch_logs_exports = ["error", "general", "slowquery"]
-  performance_insights_enabled    = var.enable_performance_insights
+  enabled_cloudwatch_logs_exports     = ["error", "general", "slowquery"]
+  performance_insights_enabled        = var.enable_performance_insights
   iam_database_authentication_enabled = true
-  auto_minor_version_upgrade      = true
-  apply_immediately               = var.environment != "prod"
+  auto_minor_version_upgrade          = true
+  apply_immediately                   = var.environment != "prod"
 
   tags = { Name = "${var.project_name}-${var.environment}-mysql" }
 
