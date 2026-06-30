@@ -184,8 +184,11 @@ pip-wheel-metadata/
 .terraform/
 *.tfstate
 *.tfstate.backup
-*.tfvars
-!*.tfvars.example
+# Environment tfvars are safe to commit — no secrets (all secrets in AWS Secrets Manager)
+!terraform/environments/**/*.tfvars
+# Block local override files and any accidental secret tfvars
+*.auto.tfvars
+*.tfvars.local
 .terraform.lock.hcl
 
 # ============================================================
