@@ -156,16 +156,22 @@ jobs:
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: terraform validate
 
-      - name: Check if EKS cluster exists in state
+      - name: Check if CI role has EKS access entry in state
         id: eks_state
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
-          if terraform state show module.eks.aws_eks_cluster.main > /dev/null 2>&1; then
+          # Use the GHA role access entry as the signal, not the cluster itself.
+          # Even when the cluster exists, the Helm provider fails if the CI role
+          # has no access entry yet (can't authenticate to the Kubernetes API).
+          GHA_ROLE="arn:aws:iam::054037129932:role/opsnexus-github-actions"
+          ENTRY_ADDR="module.eks.aws_eks_access_entry.admins[\"${GHA_ROLE}\"]"
+
+          if terraform state show "${ENTRY_ADDR}" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "EKS cluster found in state — full plan"
+            echo "GHA access entry found — CI role can authenticate, running full plan"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "EKS cluster not in state — Phase 1 targeted plan (Helm excluded)"
+            echo "GHA access entry not in state — Phase 1 targeted plan (Helm excluded)"
           fi
 
       - name: Terraform Plan

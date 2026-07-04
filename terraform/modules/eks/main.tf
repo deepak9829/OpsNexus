@@ -157,6 +157,12 @@ resource "aws_eks_cluster" "main" {
     aws_iam_role_policy_attachment.cluster_policy,
     aws_iam_role_policy_attachment.cluster_vpc_resource,
   ]
+
+  lifecycle {
+    # bootstrap_cluster_creator_admin_permissions is write-once (creation only).
+    # Changing it after cluster creation forces replacement — ignore to prevent that.
+    ignore_changes = [access_config[0].bootstrap_cluster_creator_admin_permissions]
+  }
 }
 
 # ─── IRSA: EBS CSI Driver ──────────────────────────────────────────────────
