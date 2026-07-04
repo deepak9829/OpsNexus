@@ -11,6 +11,12 @@ service:
   type: NodePort
 
 ports:
+  traefik:
+    port: 9000
+    # Redirect k8s liveness/readiness probes to the web entrypoint where
+    # --ping.entrypoint=web puts /ping. Without this the chart probes port 9000
+    # (traefik entrypoint) which returns 404 after ping is moved.
+    healthchecksPort: 8000
   web:
     port: 8000
     nodePort: 30080
@@ -18,7 +24,7 @@ ports:
       default: true
   websecure:
     expose:
-      default: false  # TLS handled by API Gateway, not Traefik
+      default: false  # TLS terminates at API Gateway
 
 # Disable dashboard in non-local environments
 ingressRoute:
@@ -38,22 +44,6 @@ providers:
 # (traefik entrypoint) — override them to match where ping actually listens.
 additionalArguments:
   - "--ping.entrypoint=web"
-
-livenessProbe:
-  httpGet:
-    path: /ping
-    port: 8000
-  initialDelaySeconds: 2
-  periodSeconds: 10
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet:
-    path: /ping
-    port: 8000
-  initialDelaySeconds: 2
-  periodSeconds: 10
-  failureThreshold: 1
 
 resources:
   requests:
