@@ -6,17 +6,15 @@
 
 deployment:
   replicas: 2
+  # Redirect k8s liveness/readiness probes to the web entrypoint (port 8000)
+  # where --ping.entrypoint=web serves /ping. Default is port 9000 (traefik
+  # entrypoint) which returns 404 once ping is moved.
+  healthchecksPort: 8000
 
 service:
   type: NodePort
 
 ports:
-  traefik:
-    port: 9000
-    # Redirect k8s liveness/readiness probes to the web entrypoint where
-    # --ping.entrypoint=web puts /ping. Without this the chart probes port 9000
-    # (traefik entrypoint) which returns 404 after ping is moved.
-    healthchecksPort: 8000
   web:
     port: 8000
     nodePort: 30080
