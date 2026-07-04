@@ -82,18 +82,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
 
-      - name: Install dependencies
-        working-directory: frontend/${{ matrix.app }}
-        run: npm ci
-
-      - name: Build
-        working-directory: frontend/${{ matrix.app }}
-        env:
-          NODE_ENV: production
-          VITE_ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
-          VITE_API_BASE_URL: ${{ needs.resolve.outputs.api_base_url }}
-        run: npm run build
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -119,9 +107,27 @@ jobs:
             --name "/opsnexus/${ENV}/${APP_KEY}/cloudfront_id" \
             --query 'Parameter.Value' --output text)
 
+          API_KEY=$(aws secretsmanager get-secret-value \
+            --secret-id "opsnexus/${ENV}/api-gateway/internal-key" \
+            --query 'SecretString' --output text)
+
           echo "s3_bucket=${S3_BUCKET}"   >> "$GITHUB_OUTPUT"
           echo "s3_prefix=${S3_PREFIX}"   >> "$GITHUB_OUTPUT"
           echo "cloudfront_id=${CF_ID}"   >> "$GITHUB_OUTPUT"
+          echo "api_key=${API_KEY}"        >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        working-directory: frontend/${{ matrix.app }}
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend/${{ matrix.app }}
+        env:
+          NODE_ENV: production
+          VITE_ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
+          VITE_API_BASE_URL: ${{ needs.resolve.outputs.api_base_url }}
+          VITE_API_KEY: ${{ steps.ssm.outputs.api_key }}
+        run: npm run build
 
       - name: Sync to S3
         working-directory: frontend/${{ matrix.app }}

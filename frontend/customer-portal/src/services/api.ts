@@ -1,6 +1,8 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import type { ApiError } from '@/types'
 
+const API_KEY = import.meta.env.VITE_API_KEY ?? ''
+
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api/v1',
   headers: { 'Content-Type': 'application/json' },
@@ -13,6 +15,7 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (token) config.headers.Authorization = `Bearer ${token}`
   if (tenantId) config.headers['X-Tenant-ID'] = tenantId
   if (userId) config.headers['X-User-ID'] = userId
+  if (API_KEY) config.headers['x-api-key'] = API_KEY
   return config
 })
 
@@ -23,7 +26,7 @@ apiClient.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
         try {
-          const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken })
+          const { data } = await apiClient.post('/auth/refresh', { refreshToken })
           localStorage.setItem('access_token', data.data.access_token)
           if (error.config) {
             error.config.headers.Authorization = `Bearer ${data.data.access_token}`
