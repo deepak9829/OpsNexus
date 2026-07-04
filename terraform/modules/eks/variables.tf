@@ -52,3 +52,9 @@ variable "system_node_desired" {
   description = "Desired count for system node group"
   default     = 2
 }
+
+variable "admin_iam_arns" {
+  type        = list(string)
+  description = "IAM user/role ARNs granted cluster-admin access via EKS Access Entries"
+  default     = []
+}

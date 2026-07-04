@@ -10,6 +10,12 @@ deployment:
 service:
   type: NodePort
 
+# NLB health check hits NodePort 30080 with GET /ping.
+# Ping must be on the same entrypoint as web traffic — if left on the default
+# "traefik" entrypoint (port 9000), the NLB never sees a healthy response.
+ping:
+  entryPoint: "web"
+
 ports:
   web:
     port: 8000

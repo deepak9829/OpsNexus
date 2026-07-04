@@ -52,6 +52,11 @@ enable_performance_insights = false
 # ─── DNS / Frontend ───────────────────────────────────────────────────────────
 domain_name = "opsnexus.site"
 
+# ─── EKS Admin Access ─────────────────────────────────────────────────────────
+# IAM users/roles that get cluster-admin on EKS via Access Entries.
+# Run: aws sts get-caller-identity --profile opsnexus --query Arn --output text
+admin_iam_arns = ["arn:aws:iam::054037129932:user/ab"]
+
 # ─── Secrets (managed in AWS Secrets Manager — never in tfvars) ──────────────
 # After first apply, set the JWT secret:
 #   aws secretsmanager put-secret-value \

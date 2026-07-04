@@ -130,6 +130,16 @@ resource "aws_eks_cluster" "main" {
     public_access_cidrs     = var.enable_public_endpoint ? var.public_access_cidrs : []
   }
 
+  access_config {
+    # API_AND_CONFIG_MAP keeps existing aws-auth ConfigMap entries working while
+    # enabling the modern Access Entries API. Transition is one-way (can go up
+    # to API-only later, but never back to CONFIG_MAP).
+    # bootstrap=false so EKS does NOT auto-create an access entry for the cluster
+    # creator — Terraform owns all entries via aws_eks_access_entry exclusively.
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = false
+  }
+
   encryption_config {
     provider {
       key_arn = aws_kms_key.eks.arn
@@ -455,4 +465,31 @@ resource "aws_cloudwatch_event_target" "karpenter" {
   rule      = each.value.name
   target_id = "karpenter-interruption-sqs"
   arn       = aws_sqs_queue.karpenter_interruption.arn
+}
+
+# ─── EKS Access Entries — IAM principals with cluster-admin ───────────────────
+# Uses the modern EKS Access Entries API (EKS 1.23+) instead of aws-auth ConfigMap.
+# Each entry grants AmazonEKSClusterAdminPolicy (equivalent to cluster-admin RBAC).
+resource "aws_eks_access_entry" "admins" {
+  for_each = toset(var.admin_iam_arns)
+
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = each.value
+  type          = "STANDARD"
+
+  tags = { Name = "${var.project_name}-${var.environment}-eks-admin-entry" }
+}
+
+resource "aws_eks_access_policy_association" "admins" {
+  for_each = toset(var.admin_iam_arns)
+
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.admins]
 }

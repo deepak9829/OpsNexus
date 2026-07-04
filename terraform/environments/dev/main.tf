@@ -133,6 +133,7 @@ module "eks" {
   public_access_cidrs        = var.public_access_cidrs
   system_node_instance_types = var.system_node_instance_types
   system_node_desired        = var.system_node_desired
+  admin_iam_arns             = var.admin_iam_arns
 
   depends_on = [module.routing]
 }

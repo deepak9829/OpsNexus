@@ -131,6 +131,12 @@ variable "enable_nat_per_az" {
   description = "true for prod HA, false for dev/staging cost savings"
 }
 
+variable "admin_iam_arns" {
+  type        = list(string)
+  description = "IAM user/role ARNs granted cluster-admin on EKS"
+  default     = []
+}
+
 variable "tf_state_bucket" {
   type        = string
   description = "S3 bucket name for Terraform state"
