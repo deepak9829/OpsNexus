@@ -156,9 +156,8 @@ jobs:
         env:
           ESO_VERSION: "0.14.0"
         run: |
-          helm repo add external-secrets https://charts.external-secrets.io --force-update
-          helm repo update
-          helm upgrade --install external-secrets external-secrets/external-secrets \
+          helm upgrade --install external-secrets \
+            oci://ghcr.io/external-secrets/charts/external-secrets \
             --version "${ESO_VERSION}" \
             --namespace external-secrets \
             --create-namespace \
