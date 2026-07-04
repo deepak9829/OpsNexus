@@ -9,8 +9,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'apps/customer-portal/**'
-      - 'apps/admin-console/**'
+      - 'frontend/customer-portal/**'
+      - 'frontend/admin-console/**'
       - '.github/workflows/frontend-deploy.yml'
   workflow_dispatch:
     inputs:
@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
 
 jobs:
   resolve:
@@ -80,14 +80,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
 
       - name: Install dependencies
-        working-directory: apps/${{ matrix.app }}
+        working-directory: frontend/${{ matrix.app }}
         run: npm ci
 
       - name: Build
-        working-directory: apps/${{ matrix.app }}
+        working-directory: frontend/${{ matrix.app }}
         env:
           NODE_ENV: production
           VITE_ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
@@ -124,7 +124,7 @@ jobs:
           echo "cloudfront_id=${CF_ID}"   >> "$GITHUB_OUTPUT"
 
       - name: Sync to S3
-        working-directory: apps/${{ matrix.app }}
+        working-directory: frontend/${{ matrix.app }}
         run: |
           S3_PATH="s3://${{ steps.ssm.outputs.s3_bucket }}/${{ steps.ssm.outputs.s3_prefix }}"
 
