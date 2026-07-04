@@ -24,7 +24,7 @@ resource "random_password" "docdb" {
 # ─── Security group ───────────────────────────────────────────────────────────
 resource "aws_security_group" "docdb" {
   name        = "${var.project_name}-${var.environment}-docdb-sg"
-  description = "DocumentDB — allow EKS nodes on port 27017"
+  description = "DocumentDB - allow EKS nodes on port 27017"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -117,7 +117,7 @@ resource "aws_secretsmanager_secret_version" "docdb" {
     port     = 27017
     username = aws_docdb_cluster.main.master_username
     password = random_password.docdb.result
-    # TLS required — driver must verify with the Amazon RDS CA bundle.
+    # TLS required - driver must verify with the Amazon RDS CA bundle.
     # Download: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
     connection_string = "mongodb://${aws_docdb_cluster.main.master_username}:${random_password.docdb.result}@${aws_docdb_cluster.main.endpoint}:27017/?tls=true&tlsCAFile=/etc/ssl/docdb/global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
   })
