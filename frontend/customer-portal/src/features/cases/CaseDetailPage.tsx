@@ -21,6 +21,7 @@ const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
 }
 
 const TRANSITION_LABELS: Record<CaseStatus, string> = {
+  new: 'New',
   open: 'Open',
   in_progress: 'Start Progress',
   pending: 'Mark Pending',
