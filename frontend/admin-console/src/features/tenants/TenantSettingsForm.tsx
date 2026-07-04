@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { X, Plus } from 'lucide-react'
 import type { TenantSettings } from '@/types'

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Search } from 'lucide-react'
 import { useAuditEvents } from '@/hooks/useAudit'
 import { Table } from '@/components/ui/Table'
 import { Input } from '@/components/ui/Input'

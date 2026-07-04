@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { useRoles, useAssignRole, useRemoveRole } from '@/hooks/useUsers'
 import type { User } from '@/types'
 

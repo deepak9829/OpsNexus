@@ -1,5 +1,4 @@
 import { Modal } from '@/components/ui/Modal'
-import { Badge } from '@/components/ui/Badge'
 import { formatDateTime } from '@/utils/format'
 import type { AuditEvent } from '@/types'
 

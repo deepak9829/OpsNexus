@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { Plus, Edit, Trash2 } from 'lucide-react'
 import { useTenants, useDeactivateTenant } from '@/hooks/useTenants'
 import { Table } from '@/components/ui/Table'
 import { Badge, planBadge, statusBadge } from '@/components/ui/Badge'
