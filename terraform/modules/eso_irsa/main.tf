@@ -34,22 +34,40 @@ resource "aws_ssm_parameter" "eso_role_arn" {
   tags  = { Name = "${var.project_name}-${var.environment}-eso-irsa-role-arn" }
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_iam_role_policy" "eso_secrets" {
   name = "secrets-manager-read"
   role = aws_iam_role.eso.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "ReadAppSecrets"
-      Effect = "Allow"
-      Action = [
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:DescribeSecret",
-      ]
-      Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:*:secret:${var.project_name}/${var.environment}/*"
-      # Covers: rds/mysql, docdb, jwt-secret, api-gateway/internal-key
-    }]
+    Statement = [
+      {
+        Sid    = "ReadAppSecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+        ]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/${var.environment}/*"
+      },
+      {
+        Sid    = "DecryptSecrets"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
+        ]
+        Resource = "arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/*"
+        Condition = {
+          StringLike = {
+            "kms:ViaService" = "secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+          }
+        }
+      }
+    ]
   })
 }
 
