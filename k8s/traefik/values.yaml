@@ -32,11 +32,28 @@ providers:
   kubernetesIngress:
     enabled: false
 
-# Enable /ping on the web entrypoint (NodePort 30080) so the NLB health check
-# gets a 200 response. Without this, ping is on the traefik entrypoint (port
-# 9000) which the NLB never reaches.
+# Ping is moved to the web entrypoint (port 8000 / NodePort 30080) so the NLB
+# health check (HTTP GET /ping on port 30080) gets a 200 response.
+# The Helm chart's built-in liveness/readiness probes default to port 9000
+# (traefik entrypoint) — override them to match where ping actually listens.
 additionalArguments:
   - "--ping.entrypoint=web"
+
+livenessProbe:
+  httpGet:
+    path: /ping
+    port: 8000
+  initialDelaySeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ping
+    port: 8000
+  initialDelaySeconds: 2
+  periodSeconds: 10
+  failureThreshold: 1
 
 resources:
   requests:
