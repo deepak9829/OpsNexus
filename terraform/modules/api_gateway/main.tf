@@ -210,6 +210,128 @@ resource "aws_api_gateway_method" "proxy_any" {
   }
 }
 
+locals {
+  cors_allow_headers = "Accept,Authorization,Content-Type,X-Request-ID,X-Tenant-ID,X-User-ID,x-api-key"
+  cors_allow_methods = "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+}
+
+# OPTIONS method on parent resource (handles /cases, /tenants etc. with no trailing path)
+resource "aws_api_gateway_method" "options_parent" {
+  for_each = local.service_paths
+
+  rest_api_id      = aws_api_gateway_rest_api.main.id
+  resource_id      = aws_api_gateway_resource.services[each.key].id
+  http_method      = "OPTIONS"
+  authorization    = "NONE"
+  api_key_required = false
+}
+
+resource "aws_api_gateway_integration" "options_parent" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.services[each.key].id
+  http_method = aws_api_gateway_method.options_parent[each.key].http_method
+  type        = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\":200}" }
+}
+
+resource "aws_api_gateway_method_response" "options_parent_200" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.services[each.key].id
+  http_method = aws_api_gateway_method.options_parent[each.key].http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = false
+    "method.response.header.Access-Control-Allow-Methods" = false
+    "method.response.header.Access-Control-Allow-Origin"  = false
+    "method.response.header.Access-Control-Max-Age"       = false
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_parent_200" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.services[each.key].id
+  http_method = aws_api_gateway_method.options_parent[each.key].http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'${local.cors_allow_headers}'"
+    "method.response.header.Access-Control-Allow-Methods" = "'${local.cors_allow_methods}'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Max-Age"       = "'86400'"
+  }
+  depends_on = [aws_api_gateway_integration.options_parent]
+}
+
+# OPTIONS method on {proxy+} resource (handles /cases/123, /cases/list etc.)
+resource "aws_api_gateway_method" "options_proxy" {
+  for_each = local.service_paths
+
+  rest_api_id      = aws_api_gateway_rest_api.main.id
+  resource_id      = aws_api_gateway_resource.proxy[each.key].id
+  http_method      = "OPTIONS"
+  authorization    = "NONE"
+  api_key_required = false
+}
+
+resource "aws_api_gateway_integration" "options_proxy" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.proxy[each.key].id
+  http_method = aws_api_gateway_method.options_proxy[each.key].http_method
+  type        = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\":200}" }
+}
+
+resource "aws_api_gateway_method_response" "options_proxy_200" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.proxy[each.key].id
+  http_method = aws_api_gateway_method.options_proxy[each.key].http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = false
+    "method.response.header.Access-Control-Allow-Methods" = false
+    "method.response.header.Access-Control-Allow-Origin"  = false
+    "method.response.header.Access-Control-Max-Age"       = false
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_proxy_200" {
+  for_each    = local.service_paths
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.proxy[each.key].id
+  http_method = aws_api_gateway_method.options_proxy[each.key].http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'${local.cors_allow_headers}'"
+    "method.response.header.Access-Control-Allow-Methods" = "'${local.cors_allow_methods}'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Max-Age"       = "'86400'"
+  }
+  depends_on = [aws_api_gateway_integration.options_proxy]
+}
+
+# Gateway responses — add CORS headers to all 4xx/5xx so browser isn't blocked on auth errors
+resource "aws_api_gateway_gateway_response" "cors_4xx" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "DEFAULT_4XX"
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'${local.cors_allow_headers}'"
+  }
+}
+
+resource "aws_api_gateway_gateway_response" "cors_5xx" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "DEFAULT_5XX"
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'${local.cors_allow_headers}'"
+  }
+}
+
 resource "aws_api_gateway_integration" "proxy_any" {
   for_each = local.service_paths
 
@@ -246,6 +368,10 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.proxy,
       aws_api_gateway_method.proxy_any,
       aws_api_gateway_integration.proxy_any,
+      aws_api_gateway_method.options_parent,
+      aws_api_gateway_method.options_proxy,
+      aws_api_gateway_gateway_response.cors_4xx,
+      aws_api_gateway_gateway_response.cors_5xx,
     ]))
   }
 
