@@ -37,6 +37,10 @@ enable_public_endpoint     = true          # Private-only in prod
 public_access_cidrs        = ["0.0.0.0/0"] # Restrict to VPN/office IPs in prod
 
 
+# ─── DocumentDB ───────────────────────────────────────────────────────────────
+docdb_instance_class = "db.t3.medium"
+docdb_instance_count = 1 # 2+ for prod HA
+
 # ─── RDS ──────────────────────────────────────────────────────────────────────
 # db_password is auto-generated and stored in AWS Secrets Manager — not set here
 db_instance_class           = "db.t3.small"

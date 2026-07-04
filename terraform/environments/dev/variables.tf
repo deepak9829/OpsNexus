@@ -90,6 +90,16 @@ variable "public_access_cidrs" {
 }
 
 
+variable "docdb_instance_class" {
+  type    = string
+  default = "db.t3.medium"
+}
+
+variable "docdb_instance_count" {
+  type    = number
+  default = 1
+}
+
 variable "domain_name" {
   type    = string
   default = "opsnexus.site"

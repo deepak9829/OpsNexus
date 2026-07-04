@@ -17,24 +17,10 @@ spec:
         app: tenant-service
         component: service
     spec:
-      initContainers:
-        - name: wait-for-mysql
-          image: busybox:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for MySQL to be ready..."
-              until nc -z mysql 3306; do
-                echo "MySQL not ready yet, sleeping 2s..."
-                sleep 2
-              done
-              echo "MySQL is ready."
       containers:
         - name: tenant-service
-          image: opsnexus-tenant-service:latest
-          imagePullPolicy: IfNotPresent
+          image: opsnexus/tenant-service:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8082
@@ -43,18 +29,27 @@ spec:
             - name: TENANT_SERVICE_PORT
               value: "8082"
             - name: MYSQL_HOST
-              value: mysql
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
             - name: MYSQL_PORT
-              value: "3306"
-            - name: TENANT_DB_NAME
-              value: tenant_db
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
             - name: TENANT_DB_USER
-              value: tenant_user
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
             - name: TENANT_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: opsnexus-secrets
-                  key: tenant-db-password
+                  name: rds-secret
+                  key: password
+            - name: TENANT_DB_NAME
+              value: tenant_db
           readinessProbe:
             httpGet:
               path: /health

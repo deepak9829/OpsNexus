@@ -17,24 +17,10 @@ spec:
         app: workflow-service
         component: service
     spec:
-      initContainers:
-        - name: wait-for-mysql
-          image: busybox:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for MySQL to be ready..."
-              until nc -z mysql 3306; do
-                echo "MySQL not ready yet, sleeping 2s..."
-                sleep 2
-              done
-              echo "MySQL is ready."
       containers:
         - name: workflow-service
-          image: opsnexus-workflow-service:latest
-          imagePullPolicy: IfNotPresent
+          image: opsnexus/workflow-service:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8083
@@ -43,18 +29,27 @@ spec:
             - name: SERVER_PORT
               value: "8083"
             - name: DB_HOST
-              value: mysql
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
             - name: DB_PORT
-              value: "3306"
-            - name: DB_NAME
-              value: workflow_db
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
             - name: DB_USER
-              value: workflow_user
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: opsnexus-secrets
-                  key: workflow-db-password
+                  name: rds-secret
+                  key: password
+            - name: DB_NAME
+              value: workflow_db
           readinessProbe:
             httpGet:
               path: /health

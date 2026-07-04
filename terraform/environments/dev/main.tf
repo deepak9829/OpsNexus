@@ -110,6 +110,32 @@ module "dynamodb" {
   environment  = var.environment
 }
 
+module "documentdb" {
+  source                  = "../../modules/documentdb"
+  project_name            = var.project_name
+  environment             = var.environment
+  vpc_id                  = module.vpc.vpc_id
+  private_db_subnet_ids   = module.subnets.private_db_subnet_ids
+  eks_node_sg_id          = module.eks.node_sg_id
+  instance_class          = var.docdb_instance_class
+  instance_count          = var.docdb_instance_count
+  deletion_protection     = var.deletion_protection
+  skip_final_snapshot     = var.skip_final_snapshot
+  backup_retention_period = var.backup_retention_period
+
+  depends_on = [module.eks]
+}
+
+module "app_irsa" {
+  source            = "../../modules/app_irsa"
+  project_name      = var.project_name
+  environment       = var.environment
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_provider_url = module.eks.oidc_provider_url
+
+  depends_on = [module.eks]
+}
+
 module "rds" {
   source                      = "../../modules/rds"
   project_name                = var.project_name

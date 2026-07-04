@@ -1,3 +1,12 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: notification-service
+  namespace: opsnexus
+  annotations:
+    # IRSA: pod assumes this role to call DynamoDB directly — no credentials in env.
+    eks.amazonaws.com/role-arn: ${NOTIFICATION_IRSA_ROLE_ARN}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,24 +26,11 @@ spec:
         app: notification-service
         component: service
     spec:
-      initContainers:
-        - name: wait-for-localstack
-          image: busybox:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for LocalStack to be ready..."
-              until nc -z localstack 4566; do
-                echo "LocalStack not ready yet, sleeping 2s..."
-                sleep 2
-              done
-              echo "LocalStack is ready."
+      serviceAccountName: notification-service
       containers:
         - name: notification-service
-          image: opsnexus-notification-service:latest
-          imagePullPolicy: IfNotPresent
+          image: opsnexus/notification-service:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8085
@@ -42,24 +38,12 @@ spec:
           env:
             - name: NOTIFICATION_SERVICE_PORT
               value: "8085"
-            - name: AWS_ENDPOINT_URL
-              value: http://localstack:4566
             - name: AWS_REGION
-              value: us-east-1
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: opsnexus-secrets
-                  key: aws-access-key-id
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: opsnexus-secrets
-                  key: aws-secret-access-key
+              value: ${AWS_REGION}
             - name: DYNAMODB_NOTIFICATIONS_TABLE
-              value: notifications
+              value: ${PROJECT_NAME}-${ENVIRONMENT}-notifications
             - name: DYNAMODB_AUDIT_TABLE
-              value: audit_events
+              value: ${PROJECT_NAME}-${ENVIRONMENT}-audit-events
           readinessProbe:
             httpGet:
               path: /health

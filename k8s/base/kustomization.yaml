@@ -5,9 +5,6 @@ namespace: opsnexus
 
 resources:
   - namespace.yaml
-  - infrastructure/mysql
-  - infrastructure/mongodb
-  - infrastructure/localstack
   - services/auth-service
   - services/tenant-service
   - services/workflow-service

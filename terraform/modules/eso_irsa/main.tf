@@ -48,6 +48,7 @@ resource "aws_iam_role_policy" "eso_secrets" {
         "secretsmanager:DescribeSecret",
       ]
       Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:*:secret:${var.project_name}/${var.environment}/*"
+      # Covers: rds/mysql, docdb, jwt-secret, api-gateway/internal-key
     }]
   })
 }

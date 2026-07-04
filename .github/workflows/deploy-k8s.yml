@@ -130,13 +130,20 @@ jobs:
             --name ${{ needs.resolve.outputs.cluster_name }} \
             --region ${{ needs.resolve.outputs.aws_region }}
 
-      - name: Fetch ESO IRSA role ARN from SSM
-        id: eso
+      - name: Fetch IRSA role ARNs from SSM
+        id: irsa
         run: |
+          ENV="${{ needs.resolve.outputs.environment }}"
+
           ESO_ROLE_ARN=$(aws ssm get-parameter \
-            --name "/opsnexus/${{ needs.resolve.outputs.environment }}/eso-irsa-role-arn" \
+            --name "/opsnexus/${ENV}/eso-irsa-role-arn" \
             --query "Parameter.Value" --output text)
-          echo "role_arn=${ESO_ROLE_ARN}" >> "$GITHUB_OUTPUT"
+          echo "eso_role_arn=${ESO_ROLE_ARN}" >> "$GITHUB_OUTPUT"
+
+          NOTIFICATION_ROLE_ARN=$(aws ssm get-parameter \
+            --name "/opsnexus/${ENV}/notification-irsa-role-arn" \
+            --query "Parameter.Value" --output text)
+          echo "notification_role_arn=${NOTIFICATION_ROLE_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Karpenter
         env:
@@ -161,9 +168,9 @@ jobs:
             --version "${ESO_VERSION}" \
             --namespace external-secrets \
             --create-namespace \
-            --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.eso.outputs.role_arn }}" \
-            --set "webhook.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.eso.outputs.role_arn }}" \
-            --set "certController.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.eso.outputs.role_arn }}" \
+            --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.irsa.outputs.eso_role_arn }}" \
+            --set "webhook.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.irsa.outputs.eso_role_arn }}" \
+            --set "certController.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.irsa.outputs.eso_role_arn }}" \
             --wait \
             --timeout 5m
 
@@ -193,6 +200,9 @@ jobs:
           ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
         run: |
           envsubst < k8s/external-secrets/cluster-secret-store.yaml | kubectl apply -f -
+          envsubst < k8s/external-secrets/rds-secret.yaml            | kubectl apply -f -
+          envsubst < k8s/external-secrets/docdb-secret.yaml          | kubectl apply -f -
+          envsubst < k8s/external-secrets/jwt-secret.yaml            | kubectl apply -f -
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
@@ -208,17 +218,15 @@ jobs:
           done
 
       - name: Apply Kustomize overlay
-        run: |
-          kubectl apply -k k8s/overlays/${{ needs.resolve.outputs.environment }} \
-            --namespace opsnexus
-
-      - name: Apply ExternalSecrets (namespace-scoped)
         env:
+          NOTIFICATION_IRSA_ROLE_ARN: ${{ steps.irsa.outputs.notification_role_arn }}
           AWS_REGION: ${{ needs.resolve.outputs.aws_region }}
+          PROJECT_NAME: opsnexus
           ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
         run: |
-          envsubst < k8s/external-secrets/jwt-secret.yaml | kubectl apply -f -
-          envsubst < k8s/external-secrets/rds-secret.yaml | kubectl apply -f -
+          kubectl kustomize k8s/overlays/${{ needs.resolve.outputs.environment }} \
+            | envsubst \
+            | kubectl apply --namespace opsnexus -f -
 
       - name: Apply Traefik IngressRoutes
         run: kubectl apply -f k8s/traefik/ingressroutes.yaml

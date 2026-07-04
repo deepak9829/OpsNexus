@@ -17,24 +17,10 @@ spec:
         app: auth-service
         component: service
     spec:
-      initContainers:
-        - name: wait-for-mysql
-          image: busybox:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for MySQL to be ready..."
-              until nc -z mysql 3306; do
-                echo "MySQL not ready yet, sleeping 2s..."
-                sleep 2
-              done
-              echo "MySQL is ready."
       containers:
         - name: auth-service
-          image: opsnexus-auth-service:latest
-          imagePullPolicy: IfNotPresent
+          image: opsnexus/auth-service:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8081
@@ -43,23 +29,32 @@ spec:
             - name: AUTH_SERVICE_PORT
               value: "8081"
             - name: MYSQL_HOST
-              value: mysql
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
             - name: MYSQL_PORT
-              value: "3306"
-            - name: AUTH_DB_NAME
-              value: auth_db
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
             - name: AUTH_DB_USER
-              value: auth_user
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
             - name: AUTH_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: opsnexus-secrets
-                  key: auth-db-password
+                  name: rds-secret
+                  key: password
+            - name: AUTH_DB_NAME
+              value: auth_db
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: opsnexus-secrets
-                  key: jwt-secret
+                  name: jwt-secret
+                  key: JWT_SECRET
             - name: JWT_ACCESS_TTL_MINUTES
               value: "15"
             - name: JWT_REFRESH_TTL_HOURS
