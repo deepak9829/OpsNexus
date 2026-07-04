@@ -116,7 +116,7 @@ module "documentdb" {
   environment             = var.environment
   vpc_id                  = module.vpc.vpc_id
   private_db_subnet_ids   = module.subnets.private_db_subnet_ids
-  eks_node_sg_id          = module.eks.node_sg_id
+  eks_node_sg_id          = module.eks.cluster_sg_id
   instance_class          = var.docdb_instance_class
   instance_count          = var.docdb_instance_count
   deletion_protection     = var.deletion_protection

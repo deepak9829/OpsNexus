@@ -190,6 +190,16 @@ resource "aws_network_acl" "db" {
     to_port    = 3306
   }
 
+  # Inbound DocumentDB (MongoDB) from VPC CIDR
+  ingress {
+    rule_no    = 110
+    protocol   = "tcp"
+    action     = "allow"
+    cidr_block = var.vpc_cidr
+    from_port  = 27017
+    to_port    = 27017
+  }
+
   # Outbound ephemeral ports back to VPC CIDR (return traffic)
   egress {
     rule_no    = 100
