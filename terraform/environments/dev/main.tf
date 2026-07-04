@@ -142,7 +142,7 @@ module "rds" {
   environment                 = var.environment
   vpc_id                      = module.vpc.vpc_id
   private_db_subnet_ids       = module.subnets.private_db_subnet_ids
-  eks_node_sg_id              = module.eks.node_sg_id
+  eks_node_sg_id              = module.eks.cluster_sg_id
   db_instance_class           = var.db_instance_class
   db_allocated_storage        = var.db_allocated_storage
   db_max_allocated_storage    = var.db_max_allocated_storage
