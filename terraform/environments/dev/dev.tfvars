@@ -36,7 +36,6 @@ system_node_desired        = 2
 enable_public_endpoint     = true          # Private-only in prod
 public_access_cidrs        = ["0.0.0.0/0"] # Restrict to VPN/office IPs in prod
 
-karpenter_version = "1.13.0"
 
 # ─── RDS ──────────────────────────────────────────────────────────────────────
 # db_password is auto-generated and stored in AWS Secrets Manager — not set here

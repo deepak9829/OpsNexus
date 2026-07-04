@@ -89,10 +89,6 @@ variable "public_access_cidrs" {
   default = ["0.0.0.0/0"]
 }
 
-variable "karpenter_version" {
-  type    = string
-  default = "1.0.0"
-}
 
 variable "domain_name" {
   type    = string

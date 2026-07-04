@@ -156,60 +156,14 @@ jobs:
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: terraform validate
 
-      - name: Check if CI role has EKS access entry in state
-        id: eks_state
-        working-directory: ${{ steps.cfg.outputs.tf_dir }}
-        run: |
-          # Use the GHA role access entry as the signal, not the cluster itself.
-          # Even when the cluster exists, the Helm provider fails if the CI role
-          # has no access entry yet (can't authenticate to the Kubernetes API).
-          GHA_ROLE="arn:aws:iam::054037129932:role/opsnexus-github-actions"
-          ENTRY_ADDR="module.eks.aws_eks_access_entry.admins[\"${GHA_ROLE}\"]"
-
-          if terraform state show "${ENTRY_ADDR}" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "GHA access entry found — CI role can authenticate, running full plan"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "GHA access entry not in state — Phase 1 targeted plan (Helm excluded)"
-          fi
-
       - name: Terraform Plan
         id: plan
         working-directory: ${{ steps.cfg.outputs.tf_dir }}
         run: |
           set +o pipefail
-
-          # Phase 1 (bootstrap): cluster not yet in state — exclude Helm/k8s providers.
-          # Karpenter and ESO helm releases need a live cluster endpoint; they're added
-          # automatically on the next pipeline run once the cluster exists.
-          if [ "${{ steps.eks_state.outputs.exists }}" = "false" ]; then
-            TARGETS=(
-              -target=module.vpc
-              -target=module.subnets
-              -target=module.routing
-              -target=module.eks
-              -target=module.ecr
-              -target=module.dynamodb
-              -target=module.rds
-              -target=module.app_secrets
-              -target=module.dns
-              -target=module.lambda_authorizer
-              -target=module.api_gateway
-              -target=module.frontend
-              -target=aws_route53_record.app
-              -target=aws_route53_record.admin
-              -target=aws_route53_record.api
-              -target=aws_autoscaling_attachment.traefik_nlb
-            )
-          else
-            TARGETS=()
-          fi
-
           terraform plan \
             -var-file="${{ steps.cfg.outputs.tfvars_file }}" \
             -var="aws_profile=" \
-            "${TARGETS[@]}" \
             -out=tfplan.binary \
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt

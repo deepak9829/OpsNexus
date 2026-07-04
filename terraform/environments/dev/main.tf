@@ -5,14 +5,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.0"
@@ -38,40 +30,6 @@ provider "aws" {
   default_tags { tags = local.default_tags }
 }
 
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    # compact() drops the empty strings when aws_profile is "" (staging/prod OIDC runs)
-    args = compact([
-      "eks", "get-token",
-      "--cluster-name", module.eks.cluster_name,
-      "--region", var.aws_region,
-      var.aws_profile != "" ? "--profile" : "",
-      var.aws_profile,
-    ])
-  }
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args = compact([
-        "eks", "get-token",
-        "--cluster-name", module.eks.cluster_name,
-        "--region", var.aws_region,
-        var.aws_profile != "" ? "--profile" : "",
-        var.aws_profile,
-      ])
-    }
-  }
-}
 
 locals {
   default_tags = merge(
@@ -138,20 +96,6 @@ module "eks" {
   depends_on = [module.routing]
 }
 
-module "karpenter" {
-  source                            = "../../modules/karpenter"
-  project_name                      = var.project_name
-  environment                       = var.environment
-  cluster_name                      = module.eks.cluster_name
-  cluster_endpoint                  = module.eks.cluster_endpoint
-  cluster_ca_certificate            = module.eks.cluster_ca_certificate
-  karpenter_role_arn                = module.eks.karpenter_role_arn
-  karpenter_interruption_queue_name = module.eks.karpenter_interruption_queue_name
-  node_role_name                    = module.eks.node_role_name
-  karpenter_version                 = var.karpenter_version
-
-  depends_on = [module.eks]
-}
 
 # ─── Data: ECR, RDS, DynamoDB ─────────────────────────────────────────────
 module "ecr" {
@@ -191,14 +135,14 @@ module "app_secrets" {
   environment  = var.environment
 }
 
-module "eso" {
-  source            = "../../modules/eso"
+module "eso_irsa" {
+  source            = "../../modules/eso_irsa"
   project_name      = var.project_name
   environment       = var.environment
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_provider_url = module.eks.oidc_provider_url
 
-  depends_on = [module.karpenter]
+  depends_on = [module.eks]
 }
 
 # ─── API Gateway + Lambda Authorizer ──────────────────────────────────────

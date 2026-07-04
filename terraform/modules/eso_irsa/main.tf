@@ -4,7 +4,8 @@ locals {
   oidc_url_stripped = replace(var.oidc_provider_url, "https://", "")
 }
 
-# IRSA role for ESO controller
+# IRSA role for the ESO controller — grants read access to Secrets Manager.
+# The Helm release is installed by the deploy-k8s workflow, not Terraform.
 resource "aws_iam_role" "eso" {
   name = "${var.project_name}-${var.environment}-eso-irsa"
 
@@ -26,6 +27,13 @@ resource "aws_iam_role" "eso" {
   tags = { Name = "${var.project_name}-${var.environment}-eso-irsa" }
 }
 
+resource "aws_ssm_parameter" "eso_role_arn" {
+  name  = "/${var.project_name}/${var.environment}/eso-irsa-role-arn"
+  type  = "String"
+  value = aws_iam_role.eso.arn
+  tags  = { Name = "${var.project_name}-${var.environment}-eso-irsa-role-arn" }
+}
+
 resource "aws_iam_role_policy" "eso_secrets" {
   name = "secrets-manager-read"
   role = aws_iam_role.eso.id
@@ -44,23 +52,3 @@ resource "aws_iam_role_policy" "eso_secrets" {
   })
 }
 
-resource "helm_release" "eso" {
-  name             = "external-secrets"
-  repository       = "https://charts.external-secrets.io"
-  chart            = "external-secrets"
-  version          = var.eso_version
-  namespace        = "external-secrets"
-  create_namespace = true
-  wait             = true
-  timeout          = 300
-
-  values = [yamlencode({
-    serviceAccount = {
-      annotations = {
-        "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn
-      }
-    }
-    webhook        = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn } } }
-    certController = { serviceAccount = { annotations = { "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn } } }
-  })]
-}
