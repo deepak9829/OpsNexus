@@ -227,11 +227,11 @@ resource "aws_api_gateway_method" "options_parent" {
 }
 
 resource "aws_api_gateway_integration" "options_parent" {
-  for_each    = local.service_paths
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.services[each.key].id
-  http_method = aws_api_gateway_method.options_parent[each.key].http_method
-  type        = "MOCK"
+  for_each          = local.service_paths
+  rest_api_id       = aws_api_gateway_rest_api.main.id
+  resource_id       = aws_api_gateway_resource.services[each.key].id
+  http_method       = aws_api_gateway_method.options_parent[each.key].http_method
+  type              = "MOCK"
   request_templates = { "application/json" = "{\"statusCode\":200}" }
 }
 
@@ -276,11 +276,11 @@ resource "aws_api_gateway_method" "options_proxy" {
 }
 
 resource "aws_api_gateway_integration" "options_proxy" {
-  for_each    = local.service_paths
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.proxy[each.key].id
-  http_method = aws_api_gateway_method.options_proxy[each.key].http_method
-  type        = "MOCK"
+  for_each          = local.service_paths
+  rest_api_id       = aws_api_gateway_rest_api.main.id
+  resource_id       = aws_api_gateway_resource.proxy[each.key].id
+  http_method       = aws_api_gateway_method.options_proxy[each.key].http_method
+  type              = "MOCK"
   request_templates = { "application/json" = "{\"statusCode\":200}" }
 }
 
