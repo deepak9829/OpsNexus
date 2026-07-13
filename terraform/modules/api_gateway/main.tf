@@ -261,7 +261,10 @@ resource "aws_api_gateway_integration_response" "options_parent_200" {
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
     "method.response.header.Access-Control-Max-Age"       = "'86400'"
   }
-  depends_on = [aws_api_gateway_integration.options_parent]
+  depends_on = [
+    aws_api_gateway_integration.options_parent,
+    aws_api_gateway_method_response.options_parent_200,
+  ]
 }
 
 # OPTIONS method on {proxy+} resource (handles /cases/123, /cases/list etc.)
@@ -310,7 +313,10 @@ resource "aws_api_gateway_integration_response" "options_proxy_200" {
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
     "method.response.header.Access-Control-Max-Age"       = "'86400'"
   }
-  depends_on = [aws_api_gateway_integration.options_proxy]
+  depends_on = [
+    aws_api_gateway_integration.options_proxy,
+    aws_api_gateway_method_response.options_proxy_200,
+  ]
 }
 
 # Gateway responses — add CORS headers to all 4xx/5xx so browser isn't blocked on auth errors
