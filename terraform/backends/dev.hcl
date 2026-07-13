@@ -1,6 +1,6 @@
-bucket       = "opsnexus-tf-state"
+bucket       = "dev-opsnexus-tf-state"
 key          = "dev/terraform.tfstate"
-region       = "ap-southeast-1"
+region       = "ap-south-1"
 encrypt      = true
 use_lockfile = true
 profile      = "opsnexus"

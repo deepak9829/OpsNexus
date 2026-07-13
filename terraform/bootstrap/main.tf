@@ -28,10 +28,10 @@ data "aws_caller_identity" "current" {}
 
 # ─── S3 state bucket ──────────────────────────────────────────────────────
 resource "aws_s3_bucket" "tf_state" {
-  bucket        = "opsnexus-tf-state"
+  bucket        = "dev-opsnexus-tf-state"
   force_destroy = false
   tags = {
-    Name      = "opsnexus-tf-state"
+    Name      = "dev-opsnexus-tf-state"
     ManagedBy = "Terraform"
     Purpose   = "Terraform state storage"
   }
@@ -238,7 +238,7 @@ resource "aws_iam_role_policy" "github_actions" {
 
 variable "aws_region" {
   type    = string
-  default = "ap-southeast-1"
+  default = "ap-south-1"
 }
 
 variable "aws_profile" {

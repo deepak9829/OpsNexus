@@ -111,22 +111,22 @@ variable "nlb_arn" {
   description = "NLB ARN from Traefik install. Empty until Traefik deployed."
 }
 
-variable "caylent_owner" {
+variable "owner" {
   type    = string
-  default = "deepak.saini@caylent.com"
+  default = "deepak.saini@opsnexus.site"
 }
 
-variable "caylent_customer" {
-  type    = string
-  default = ""
-}
-
-variable "caylent_workload" {
+variable "customer" {
   type    = string
   default = ""
 }
 
-variable "caylent_project" {
+variable "workload" {
+  type    = string
+  default = ""
+}
+
+variable "project" {
   type    = string
   default = ""
 }

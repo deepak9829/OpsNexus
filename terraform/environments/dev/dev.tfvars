@@ -3,15 +3,14 @@ aws_profile  = "opsnexus" # Local runs only — CI/CD uses OIDC (leave empty in 
 project_name = "opsnexus"
 environment  = "dev"
 
-# ─── Caylent Tagging ──────────────────────────────────────────────────────────
-caylent_owner    = "deepak.saini@caylent.com" # Required
-caylent_customer = "OpsNexus"                 # Optional
-caylent_workload = "opsnexus-platform"        # Optional
-caylent_project  = "opsnexus-platform"        # Optional
+owner    = "deepak.saini@opsnexus.site"
+customer = "OpsNexus"
+workload = "opsnexus-platform"
+project  = "opsnexus-platform"
 
 # ─── Terraform State ──────────────────────────────────────────────────────────
 # State bucket lives in Singapore (created by bootstrap); deploy region is Mumbai
-tf_state_bucket = "opsnexus-tf-state"
+tf_state_bucket = "dev-opsnexus-tf-state"
 tf_state_key    = "dev/terraform.tfstate"
 tf_state_region = "ap-southeast-1"
 
@@ -59,8 +58,8 @@ domain_name = "opsnexus.site"
 # IAM users/roles that get cluster-admin on EKS via Access Entries.
 # Run: aws sts get-caller-identity --profile opsnexus --query Arn --output text
 admin_iam_arns = [
-  "arn:aws:iam::054037129932:user/ab",                      # local dev
-  "arn:aws:iam::054037129932:role/opsnexus-github-actions", # CI/CD
+  "arn:aws:iam::629068384229:user/OpsNexus",                # local dev
+  "arn:aws:iam::629068384229:role/opsnexus-github-actions", # CI/CD
 ]
 
 # ─── Secrets (managed in AWS Secrets Manager — never in tfvars) ──────────────

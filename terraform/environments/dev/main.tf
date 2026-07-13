@@ -33,10 +33,10 @@ provider "aws" {
 
 locals {
   default_tags = merge(
-    { "caylent:owner" = var.caylent_owner },
-    var.caylent_customer != "" ? { "caylent:customer" = var.caylent_customer } : {},
-    var.caylent_workload != "" ? { "caylent:workload" = var.caylent_workload } : {},
-    var.caylent_project != "" ? { "caylent:project" = var.caylent_project } : {},
+    { Owner = var.owner },
+    var.customer != "" ? { Customer = var.customer } : {},
+    var.workload != "" ? { Workload = var.workload } : {},
+    var.project != "" ? { Project = var.project } : {},
     {
       Environment = var.environment
       ManagedBy   = "Terraform"

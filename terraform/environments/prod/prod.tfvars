@@ -2,14 +2,13 @@ aws_region   = "ap-southeast-1"
 project_name = "opsnexus"
 environment  = "prod"
 
-# ─── Caylent Tagging ──────────────────────────────────────────────────────────
-caylent_owner    = "deepak.saini@caylent.com" # Required
-caylent_customer = "OpsNexus"                 # Optional
-caylent_workload = "opsnexus-platform"        # Optional
-caylent_project  = "opsnexus-platform"        # Optional
+owner    = "deepak.saini@opsnexus.site"
+customer = "OpsNexus"
+workload = "opsnexus-platform"
+project  = "opsnexus-platform"
 
 # ─── Terraform State ──────────────────────────────────────────────────────────
-tf_state_bucket = "opsnexus-tf-state"
+tf_state_bucket = "prod-opsnexus-tf-state"
 tf_state_key    = "prod/terraform.tfstate"
 tf_state_region = "ap-southeast-1"
 
