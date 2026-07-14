@@ -40,11 +40,28 @@ spec:
           env:
             - name: DOCUMENT_SERVICE_PORT
               value: "8084"
-            - name: MONGO_URI
+            - name: DOCDB_HOST
               valueFrom:
                 secretKeyRef:
                   name: docdb-secret
-                  key: connection_string
+                  key: host
+            - name: DOCDB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: docdb-secret
+                  key: port
+            - name: DOCDB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: docdb-secret
+                  key: username
+            - name: DOCDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: docdb-secret
+                  key: password
+            - name: DOCDB_TLS_CA_FILE
+              value: /etc/ssl/docdb/global-bundle.pem
             - name: MONGO_DB_NAME
               value: documents_db
           readinessProbe:
