@@ -12,7 +12,8 @@ deployment:
   healthchecksPort: 8000
 
 service:
-  type: NodePort
+  spec:
+    type: NodePort
 
 ports:
   web:
