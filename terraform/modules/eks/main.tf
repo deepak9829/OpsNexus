@@ -90,7 +90,6 @@ resource "aws_security_group" "eks_nodes" {
     self        = true
   }
 
-
   egress {
     description = "All outbound"
     from_port   = 0
@@ -100,6 +99,46 @@ resource "aws_security_group" "eks_nodes" {
   }
 
   tags = { Name = "${var.project_name}-${var.environment}-eks-nodes-sg" }
+}
+
+# EKS private endpoint uses the cluster SG; Karpenter nodes need HTTPS inbound
+# rules so the control plane can reach their kubelets (10250) and so nodes can
+# be reached for exec/logs. The cluster SG also needs to allow inbound 443 from
+# the node SG so nodes can connect to the EKS private API endpoint.
+resource "aws_security_group_rule" "node_to_cluster_https" {
+  security_group_id        = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_nodes.id
+  description              = "Karpenter nodes to EKS private API endpoint"
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "aws_security_group_rule" "cluster_to_node_https" {
+  security_group_id        = aws_security_group.eks_nodes.id
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+  description              = "EKS control plane to node HTTPS"
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "aws_security_group_rule" "cluster_to_node_kubelet" {
+  security_group_id        = aws_security_group.eks_nodes.id
+  type                     = "ingress"
+  from_port                = 10250
+  to_port                  = 10250
+  protocol                 = "tcp"
+  source_security_group_id = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+  description              = "EKS control plane to kubelet"
+
+  depends_on = [aws_eks_cluster.main]
 }
 
 # Allow NLB health checks and traffic to reach Traefik on NodePort 30080.
