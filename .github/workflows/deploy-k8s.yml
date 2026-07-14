@@ -44,11 +44,10 @@ jobs:
       github.event_name == 'push' ||
       github.event.workflow_run.conclusion == 'success'
     outputs:
-      environment:        ${{ steps.resolve.outputs.environment }}
-      aws_region:         ${{ steps.resolve.outputs.aws_region }}
-      image_tag:          ${{ steps.resolve.outputs.image_tag }}
-      cluster_name:       ${{ steps.resolve.outputs.cluster_name }}
-      karpenter_role_arn: ${{ steps.resolve.outputs.karpenter_role_arn }}
+      environment:  ${{ steps.resolve.outputs.environment }}
+      aws_region:   ${{ steps.resolve.outputs.aws_region }}
+      image_tag:    ${{ steps.resolve.outputs.image_tag }}
+      cluster_name: ${{ steps.resolve.outputs.cluster_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,14 +91,10 @@ jobs:
             prod)    REGION="ap-southeast-1" ;;
           esac
 
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          KARPENTER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/opsnexus-${ENV}-karpenter-controller"
-
-          echo "environment=${ENV}"                           >> "$GITHUB_OUTPUT"
-          echo "aws_region=${REGION}"                         >> "$GITHUB_OUTPUT"
-          echo "image_tag=${TAG}"                             >> "$GITHUB_OUTPUT"
-          echo "cluster_name=opsnexus-${ENV}-eks"            >> "$GITHUB_OUTPUT"
-          echo "karpenter_role_arn=${KARPENTER_ROLE_ARN}"    >> "$GITHUB_OUTPUT"
+          echo "environment=${ENV}"            >> "$GITHUB_OUTPUT"
+          echo "aws_region=${REGION}"          >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TAG}"              >> "$GITHUB_OUTPUT"
+          echo "cluster_name=opsnexus-${ENV}-eks" >> "$GITHUB_OUTPUT"
           echo "Resolved → environment: ${ENV}, tag: ${TAG}"
 
   deploy:
@@ -150,13 +145,17 @@ jobs:
         env:
           KARPENTER_VERSION: "1.13.0"
         run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ENV="${{ needs.resolve.outputs.environment }}"
+          KARPENTER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/opsnexus-${ENV}-karpenter-controller"
+
           helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
             --version "${KARPENTER_VERSION}" \
             --namespace karpenter \
             --create-namespace \
-            --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ needs.resolve.outputs.karpenter_role_arn }}" \
+            --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${KARPENTER_ROLE_ARN}" \
             --set "settings.clusterName=${{ needs.resolve.outputs.cluster_name }}" \
-            --set "settings.interruptionQueue=opsnexus-${{ needs.resolve.outputs.environment }}-karpenter-interruption" \
+            --set "settings.interruptionQueue=opsnexus-${ENV}-karpenter-interruption" \
             --wait \
             --timeout 5m
 
