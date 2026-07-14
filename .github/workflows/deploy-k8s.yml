@@ -279,24 +279,28 @@ jobs:
           export SEED_IMAGE_WORKFLOW="${ECR}/opsnexus/workflow-service:${TAG}"
 
           # Delete any previous (completed/failed) seed jobs so re-runs work
-          kubectl delete job seed-auth seed-tenant seed-workflow \
+          kubectl delete job seed-auth seed-tenant seed-workflow seed-data \
+            -n opsnexus --ignore-not-found=true
+          kubectl delete configmap seed-data-script \
             -n opsnexus --ignore-not-found=true
 
+          # DB schema + base data (auth users/roles, tenant, workflow templates)
           envsubst < k8s/jobs/seed-auth.yaml     | kubectl apply -n opsnexus -f -
           envsubst < k8s/jobs/seed-tenant.yaml   | kubectl apply -n opsnexus -f -
           envsubst < k8s/jobs/seed-workflow.yaml | kubectl apply -n opsnexus -f -
 
-          echo "Waiting for seed-auth..."
-          kubectl wait job/seed-auth -n opsnexus --for=condition=complete --timeout=120s
-          echo "Waiting for seed-tenant..."
-          kubectl wait job/seed-tenant -n opsnexus --for=condition=complete --timeout=120s
-          echo "Waiting for seed-workflow..."
-          kubectl wait job/seed-workflow -n opsnexus --for=condition=complete --timeout=120s
+          echo "Waiting for schema seed jobs..."
+          kubectl wait job/seed-auth job/seed-tenant job/seed-workflow \
+            -n opsnexus --for=condition=complete --timeout=120s
+
+          # Demo data: cases, comments, tasks, notifications (via live API)
+          kubectl apply -f k8s/jobs/seed-data.yaml
+          echo "Waiting for seed-data job (cases/notifications)..."
+          kubectl wait job/seed-data -n opsnexus --for=condition=complete --timeout=300s
 
           echo "All seed jobs completed."
-          kubectl logs -n opsnexus -l app=seed-auth     --tail=20 || true
-          kubectl logs -n opsnexus -l app=seed-tenant   --tail=20 || true
-          kubectl logs -n opsnexus -l app=seed-workflow --tail=20 || true
+          kubectl logs -n opsnexus -l app=seed-auth  -c seed --tail=5 || true
+          kubectl logs -n opsnexus -l app=seed-data  -c seed --tail=20 || true
 
       - name: Rollback on failure
         if: failure()

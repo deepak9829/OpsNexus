@@ -2,9 +2,9 @@
 # seed-data.sh — populate OpsNexus with realistic demo data
 set -uo pipefail
 
-BASE_AUTH="http://localhost:8081/api/v1"
-BASE_WF="http://localhost:8083/api/v1"
-BASE_NOTIF="http://localhost:8085/api/v1"
+BASE_AUTH="${BASE_AUTH:-http://localhost:8081/api/v1}"
+BASE_WF="${BASE_WF:-http://localhost:8083/api/v1}"
+BASE_NOTIF="${BASE_NOTIF:-http://localhost:8085/api/v1}"
 TENANT="00000000-0000-0000-0000-000000000001"
 
 log() { echo "  ✓ $1" >&2; }
