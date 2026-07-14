@@ -472,9 +472,9 @@ resource "aws_iam_role_policy" "karpenter_controller" {
         Resource = "*"
       },
       {
-        Sid    = "AllowSpotServiceLinkedRole"
-        Effect = "Allow"
-        Action = ["iam:CreateServiceLinkedRole"]
+        Sid      = "AllowSpotServiceLinkedRole"
+        Effect   = "Allow"
+        Action   = ["iam:CreateServiceLinkedRole"]
         Resource = "arn:aws:iam::*:role/aws-service-role/spot.amazonaws.com/AWSServiceRoleForEC2Spot"
         Condition = {
           StringEquals = {
