@@ -23,6 +23,11 @@ type ServerConfig struct {
 
 type DatabaseConfig struct {
 	DSN             string
+	Host            string
+	Port            string
+	User            string
+	Password        string
+	Name            string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
@@ -71,19 +76,20 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing DB_CONN_MAX_LIFETIME: %w", err)
 	}
 
+	host := viper.GetString("DB_HOST")
+	port := viper.GetString("DB_PORT")
+	user := viper.GetString("DB_USER")
+	pass := viper.GetString("DB_PASSWORD")
+	name := viper.GetString("DB_NAME")
+	if host == "" {
+		host = "localhost"
+	}
+	if port == "" {
+		port = "3306"
+	}
+
 	dsn := viper.GetString("DATABASE_URL")
 	if dsn == "" {
-		host := viper.GetString("DB_HOST")
-		port := viper.GetString("DB_PORT")
-		user := viper.GetString("DB_USER")
-		pass := viper.GetString("DB_PASSWORD")
-		name := viper.GetString("DB_NAME")
-		if host == "" {
-			host = "localhost"
-		}
-		if port == "" {
-			port = "3306"
-		}
 		dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC", user, pass, host, port, name)
 	}
 
@@ -96,6 +102,11 @@ func Load() (*Config, error) {
 		},
 		Database: DatabaseConfig{
 			DSN:             dsn,
+			Host:            host,
+			Port:            port,
+			User:            user,
+			Password:        pass,
+			Name:            name,
 			MaxOpenConns:    viper.GetInt("DB_MAX_OPEN_CONNS"),
 			MaxIdleConns:    viper.GetInt("DB_MAX_IDLE_CONNS"),
 			ConnMaxLifetime: connMaxLifetime,

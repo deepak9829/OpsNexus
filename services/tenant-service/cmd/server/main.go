@@ -32,6 +32,21 @@ func main() {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := mysql.EnsureDatabase(cfg); err != nil {
+			logger.Fatal("failed to ensure database", zap.Error(err))
+		}
+		db, err := mysql.NewDB(cfg)
+		if err != nil {
+			logger.Fatal("failed to connect to database", zap.Error(err))
+		}
+		if err := mysql.AutoMigrate(db); err != nil {
+			logger.Fatal("failed to run migrations", zap.Error(err))
+		}
+		logger.Info("migrations complete", zap.String("database", cfg.DBName))
+		return
+	}
+
 	// ── Database ──────────────────────────────────────────────────────────────
 	db, err := mysql.NewDB(cfg)
 	if err != nil {
@@ -39,11 +54,7 @@ func main() {
 	}
 
 	// ── Migrations ────────────────────────────────────────────────────────────
-	if err := db.AutoMigrate(
-		&mysql.TenantModelExported{},
-		&mysql.OrganizationModelExported{},
-		&mysql.UserProfileModelExported{},
-	); err != nil {
+	if err := mysql.AutoMigrate(db); err != nil {
 		logger.Fatal("running migrations", zap.Error(err))
 	}
 	logger.Info("migrations applied")

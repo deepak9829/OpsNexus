@@ -17,6 +17,39 @@ spec:
         app: auth-service
         component: service
     spec:
+      initContainers:
+        - name: migrate
+          image: opsnexus/auth-service:latest
+          imagePullPolicy: Always
+          args: ["migrate"]
+          env:
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
+            - name: AUTH_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: password
+            - name: AUTH_DB_NAME
+              value: auth_db
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_SECRET
       containers:
         - name: auth-service
           image: opsnexus/auth-service:latest

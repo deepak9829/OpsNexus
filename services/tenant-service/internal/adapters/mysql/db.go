@@ -11,6 +11,31 @@ import (
 	"github.com/opsnexus/tenant-service/internal/config"
 )
 
+// EnsureDatabase connects without a database name and creates the target
+// database if it does not already exist. Safe to call on every startup.
+func EnsureDatabase(cfg *config.Config) error {
+	rootDSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local",
+		cfg.DBUser, cfg.DBPass, cfg.MySQLHost, cfg.MySQLPort)
+	db, err := gorm.Open(mysql.Open(rootDSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		return fmt.Errorf("connecting to mysql (no db): %w", err)
+	}
+	sql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", cfg.DBName)
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("creating database %s: %w", cfg.DBName, err)
+	}
+	return nil
+}
+
+// AutoMigrate runs GORM schema migrations for all tenant-service models.
+func AutoMigrate(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&TenantModelExported{},
+		&OrganizationModelExported{},
+		&UserProfileModelExported{},
+	)
+}
+
 // NewDB opens a GORM/MySQL connection using the supplied configuration.
 func NewDB(cfg *config.Config) (*gorm.DB, error) {
 	logLevel := logger.Silent

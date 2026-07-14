@@ -17,6 +17,34 @@ spec:
         app: tenant-service
         component: service
     spec:
+      initContainers:
+        - name: migrate
+          image: opsnexus/tenant-service:latest
+          imagePullPolicy: Always
+          args: ["migrate"]
+          env:
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
+            - name: TENANT_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
+            - name: TENANT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: password
+            - name: TENANT_DB_NAME
+              value: tenant_db
       containers:
         - name: tenant-service
           image: opsnexus/tenant-service:latest

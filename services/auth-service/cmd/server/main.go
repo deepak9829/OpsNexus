@@ -35,6 +35,21 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck // best-effort flush
 
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := mysqladapter.EnsureDatabase(cfg.Database); err != nil {
+			logger.Fatal("failed to ensure database", zap.Error(err))
+		}
+		db, err := mysqladapter.NewConnection(cfg.Database)
+		if err != nil {
+			logger.Fatal("failed to connect to database", zap.Error(err))
+		}
+		if err := mysqladapter.AutoMigrate(db); err != nil {
+			logger.Fatal("failed to run migrations", zap.Error(err))
+		}
+		logger.Info("migrations complete", zap.String("database", cfg.Database.Name))
+		return
+	}
+
 	db, err := mysqladapter.NewConnection(cfg.Database)
 	if err != nil {
 		logger.Fatal("failed to connect to database", zap.Error(err))

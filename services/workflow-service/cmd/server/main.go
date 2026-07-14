@@ -36,13 +36,35 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// Database
-	db, err := mysql.NewDB(mysql.Config{
+	dbCfg := mysql.Config{
 		DSN:             cfg.Database.DSN,
+		DBHost:          cfg.Database.Host,
+		DBPort:          cfg.Database.Port,
+		DBUser:          cfg.Database.User,
+		DBPassword:      cfg.Database.Password,
+		DBName:          cfg.Database.Name,
 		MaxOpenConns:    cfg.Database.MaxOpenConns,
 		MaxIdleConns:    cfg.Database.MaxIdleConns,
 		ConnMaxLifetime: cfg.Database.ConnMaxLifetime,
-	})
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := mysql.EnsureDatabase(dbCfg); err != nil {
+			logger.Fatal("failed to ensure database", zap.Error(err))
+		}
+		db, err := mysql.NewDB(dbCfg)
+		if err != nil {
+			logger.Fatal("connecting to database", zap.Error(err))
+		}
+		if err := mysql.AutoMigrate(db); err != nil {
+			logger.Fatal("running migrations", zap.Error(err))
+		}
+		logger.Info("migrations complete", zap.String("database", cfg.Database.Name))
+		return
+	}
+
+	// Database
+	db, err := mysql.NewDB(dbCfg)
 	if err != nil {
 		logger.Fatal("connecting to database", zap.Error(err))
 	}

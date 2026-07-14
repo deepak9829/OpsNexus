@@ -17,6 +17,34 @@ spec:
         app: workflow-service
         component: service
     spec:
+      initContainers:
+        - name: migrate
+          image: opsnexus/workflow-service:latest
+          imagePullPolicy: Always
+          args: ["migrate"]
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: password
+            - name: DB_NAME
+              value: workflow_db
       containers:
         - name: workflow-service
           image: opsnexus/workflow-service:latest
