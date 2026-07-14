@@ -1,0 +1,993 @@
+<title>OpsNexus — AWS Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ground:       #080C18;
+    --surface:      #0D1525;
+    --surface-2:    #111D33;
+    --text:         #E2E8F4;
+    --muted:        #6B82A8;
+    --accent:       #FF9900;
+    --accent-blue:  #38BDF8;
+    --accent-green: #4ADE80;
+    --accent-red:   #F87171;
+    --accent-purple:#A78BFA;
+    --border:       #1A2A45;
+
+    --aws-orange: #FF9900;
+    --aws-pink:   #FF4F8B;
+    --aws-green:  #3F8624;
+    --aws-purple: #8C4FFF;
+    --aws-red:    #DD344C;
+    --aws-teal:   #007DB8;
+
+    --mono: 'SF Mono','Cascadia Mono','Consolas','Courier New',monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.4;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  /* ── Title bar ─────────────────────────────────────────── */
+  .title-bar {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .title-bar h1 {
+    font-family: var(--sans);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .title-bar h1 span { color: var(--accent); }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .badge-region { background: rgba(56,189,248,.12); color: var(--accent-blue); border: 1px solid rgba(56,189,248,.25); }
+  .badge-env    { background: rgba(255,153,0,.12);  color: var(--accent);      border: 1px solid rgba(255,153,0,.25); }
+
+  /* ── Traffic flow ribbon ───────────────────────────────── */
+  .flow-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow: visible;
+    position: relative;
+  }
+  .flow-ribbon .ribbon-label {
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-right: 16px;
+    white-space: nowrap;
+  }
+  .flow-nodes {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex: 1;
+    position: relative;
+  }
+  .flow-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    position: relative;
+    z-index: 2;
+  }
+  .flow-node .fn-icon {
+    width: 36px; height: 36px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    position: relative;
+  }
+  .flow-node .fn-label {
+    font-size: 9px;
+    color: var(--muted);
+    white-space: nowrap;
+    text-align: center;
+  }
+  .flow-node .fn-detail {
+    font-size: 8px;
+    color: var(--muted);
+    opacity: 0.6;
+    white-space: nowrap;
+    text-align: center;
+  }
+  .flow-connector {
+    flex: 1;
+    height: 2px;
+    background: linear-gradient(90deg, var(--border), var(--border));
+    position: relative;
+    min-width: 24px;
+    z-index: 1;
+    overflow: visible;
+  }
+  .flow-connector.animated {
+    background: linear-gradient(90deg, var(--border) 0%, rgba(255,153,0,.3) 50%, var(--border) 100%);
+  }
+  .packet {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent), 0 0 16px rgba(255,153,0,.4);
+    animation: packet-travel 4s linear infinite;
+    opacity: 0;
+  }
+  @keyframes packet-travel {
+    0%   { left: 0%;   opacity: 0; }
+    5%   { opacity: 1; }
+    95%  { opacity: 1; }
+    100% { left: 100%; opacity: 0; }
+  }
+
+  /* stagger packets across connectors */
+  .flow-connector:nth-child(2) .packet  { animation-delay: 0s; }
+  .flow-connector:nth-child(4) .packet  { animation-delay: 0.45s; }
+  .flow-connector:nth-child(6) .packet  { animation-delay: 0.9s; }
+  .flow-connector:nth-child(8) .packet  { animation-delay: 1.35s; }
+  .flow-connector:nth-child(10) .packet { animation-delay: 1.8s; }
+  .flow-connector:nth-child(12) .packet { animation-delay: 2.25s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .packet { animation: none; display: none; }
+  }
+
+  /* ── Main layout ───────────────────────────────────────── */
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    gap: 16px;
+    align-items: start;
+  }
+
+  /* ── VPC box ───────────────────────────────────────────── */
+  .vpc-box {
+    border: 2px dashed rgba(140,79,255,.5);
+    border-radius: 8px;
+    padding: 12px;
+    position: relative;
+  }
+  .vpc-label {
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    background: var(--ground);
+    padding: 0 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #A78BFA;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vpc-label .vpc-cidr {
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  /* ── Subnet zones ──────────────────────────────────────── */
+  .subnet-zone {
+    border: 1px dashed;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .subnet-zone:last-child { margin-bottom: 0; }
+
+  .subnet-zone.public  { border-color: rgba(56,189,248,.35); }
+  .subnet-zone.eks     { border-color: rgba(255,153,0,.3);   }
+  .subnet-zone.db      { border-color: rgba(74,222,128,.3);  }
+
+  .zone-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .subnet-zone.public .zone-label  { color: var(--accent-blue); }
+  .subnet-zone.eks    .zone-label  { color: var(--accent); }
+  .subnet-zone.db     .zone-label  { color: var(--accent-green); }
+
+  .zone-cidrs {
+    font-size: 8px;
+    color: var(--muted);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* ── AZ columns ────────────────────────────────────────── */
+  .az-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .az-col {
+    border: 1px solid rgba(255,255,255,.05);
+    border-radius: 4px;
+    padding: 7px;
+    background: rgba(255,255,255,.02);
+  }
+  .az-col-label {
+    font-size: 8px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+
+  /* ── Service cards ─────────────────────────────────────── */
+  .svc {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0;
+    overflow: hidden;
+    margin-bottom: 5px;
+  }
+  .svc:last-child { margin-bottom: 0; }
+  .svc-bar { height: 3px; }
+  .svc-body {
+    padding: 5px 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .svc-name {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .svc-detail {
+    font-size: 8px;
+    color: var(--muted);
+  }
+  .svc-detail.port {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* horizontal svc layout */
+  .svc-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .svc-row .svc {
+    flex: 1;
+    min-width: 90px;
+    margin-bottom: 0;
+  }
+  .svc-row:last-child { margin-bottom: 0; }
+
+  /* inline svc (tiny variant) */
+  .svc.tiny .svc-body { padding: 3px 6px; }
+  .svc.tiny .svc-name { font-size: 9px; }
+  .svc.tiny .svc-detail { font-size: 7px; }
+
+  /* ── EKS cluster box ───────────────────────────────────── */
+  .eks-cluster {
+    border: 1px solid rgba(255,153,0,.25);
+    border-radius: 5px;
+    padding: 8px;
+    background: rgba(255,153,0,.03);
+    margin-top: 8px;
+  }
+  .eks-cluster-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .eks-cluster-label .version {
+    font-weight: 400;
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .node-group {
+    border: 1px dashed rgba(255,153,0,.2);
+    border-radius: 4px;
+    padding: 6px;
+    margin-bottom: 6px;
+    background: rgba(255,153,0,.02);
+  }
+  .node-group-label {
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+  }
+
+  /* workloads grid */
+  .workloads-section {
+    margin-top: 8px;
+    border: 1px dashed rgba(255,255,255,.08);
+    border-radius: 4px;
+    padding: 7px;
+  }
+  .workloads-label {
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+
+  /* ── Managed sidebar ───────────────────────────────────── */
+  .managed-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ms-group {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    background: var(--surface);
+  }
+  .ms-group-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Legend ────────────────────────────────────────────── */
+  .legend {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .legend-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 9px;
+    color: var(--muted);
+  }
+  .legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 2px;
+  }
+  .legend-line {
+    width: 20px; height: 2px;
+  }
+
+  /* ── Utility ───────────────────────────────────────────── */
+  .flex-row { display: flex; gap: 8px; }
+  .flex-col { display: flex; flex-direction: column; gap: 6px; }
+  .mt4 { margin-top: 4px; }
+  .mt6 { margin-top: 6px; }
+  .mt8 { margin-top: 8px; }
+</style>
+
+<!-- ═══════════════════════ TITLE ═══════════════════════ -->
+<div class="title-bar">
+  <h1>Ops<span>Nexus</span></h1>
+  <span class="badge badge-region">ap-south-1 · Mumbai</span>
+  <span class="badge badge-env">dev environment</span>
+  <span style="margin-left:auto;font-size:9px;color:var(--muted);">EKS v1.36 · Karpenter v1.13 · Terraform managed</span>
+</div>
+
+<!-- ═══════════════════════ TRAFFIC FLOW RIBBON ═══════════════════════ -->
+<div class="flow-ribbon">
+  <div class="ribbon-label">API Request Path</div>
+  <div class="flow-nodes">
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(140,79,255,.12);border:1px solid rgba(140,79,255,.3);">🌐</div>
+      <div class="fn-label">Internet</div>
+      <div class="fn-detail">Users</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(140,79,255,.12);border:1px solid rgba(140,79,255,.3);">⬡</div>
+      <div class="fn-label">Route 53</div>
+      <div class="fn-detail">api.dev.opsnexus.site</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(255,79,139,.12);border:1px solid rgba(255,79,139,.3);">◈</div>
+      <div class="fn-label">API Gateway</div>
+      <div class="fn-detail">Regional · HTTPS</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(255,153,0,.12);border:1px solid rgba(255,153,0,.3);">λ</div>
+      <div class="fn-label">JWT Authorizer</div>
+      <div class="fn-detail">Node.js 20.x · 300s</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(140,79,255,.12);border:1px solid rgba(140,79,255,.3);">⬡</div>
+      <div class="fn-label">VPC Link</div>
+      <div class="fn-detail">Private integration</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(140,79,255,.12);border:1px solid rgba(140,79,255,.3);">◈</div>
+      <div class="fn-label">NLB</div>
+      <div class="fn-detail">Network load balancer</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);">⟁</div>
+      <div class="fn-label">Traefik</div>
+      <div class="fn-detail">NodePort :30080</div>
+    </div>
+
+    <div class="flow-connector animated"><div class="packet"></div></div>
+
+    <div class="flow-node">
+      <div class="fn-icon" style="background:rgba(255,153,0,.12);border:1px solid rgba(255,153,0,.3);">⬡</div>
+      <div class="fn-label">Go Services</div>
+      <div class="fn-detail">ClusterIP · :808x</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════ MAIN LAYOUT ═══════════════════════ -->
+<div class="main-layout">
+
+  <!-- ──────────────── VPC ──────────────── -->
+  <div class="vpc-box">
+    <div class="vpc-label">
+      <span style="color:#A78BFA;">◈ VPC</span>
+      <span class="vpc-cidr">10.0.0.0/16</span>
+      <span class="vpc-cidr">· 3 AZs</span>
+    </div>
+
+    <!-- PUBLIC SUBNETS -->
+    <div class="subnet-zone public">
+      <div class="zone-label">
+        Public Subnets
+        <span class="zone-cidrs">
+          <span>10.0.1.0/24</span><span>10.0.2.0/24</span><span>10.0.3.0/24</span>
+        </span>
+      </div>
+      <div class="az-grid">
+
+        <!-- AZ 1a -->
+        <div class="az-col">
+          <div class="az-col-label">ap-south-1a</div>
+          <div class="svc">
+            <div class="svc-bar" style="background:var(--aws-purple);"></div>
+            <div class="svc-body">
+              <div class="svc-name">Internet Gateway</div>
+              <div class="svc-detail">igw-attached to VPC</div>
+            </div>
+          </div>
+          <div class="svc mt4">
+            <div class="svc-bar" style="background:var(--aws-purple);"></div>
+            <div class="svc-body">
+              <div class="svc-name">NAT Gateway</div>
+              <div class="svc-detail">EIP · single AZ</div>
+            </div>
+          </div>
+          <div class="svc mt4">
+            <div class="svc-bar" style="background:var(--aws-purple);"></div>
+            <div class="svc-body">
+              <div class="svc-name">NLB</div>
+              <div class="svc-detail">NodePort :30080 target</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AZ 1b -->
+        <div class="az-col">
+          <div class="az-col-label">ap-south-1b</div>
+          <div class="svc">
+            <div class="svc-bar" style="background:var(--aws-purple);"></div>
+            <div class="svc-body">
+              <div class="svc-name">NLB (AZ node)</div>
+              <div class="svc-detail">routes via NAT ← 1a</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AZ 1c -->
+        <div class="az-col">
+          <div class="az-col-label">ap-south-1c</div>
+          <div class="svc">
+            <div class="svc-bar" style="background:var(--aws-purple);"></div>
+            <div class="svc-body">
+              <div class="svc-name">NLB (AZ node)</div>
+              <div class="svc-detail">routes via NAT ← 1a</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /az-grid -->
+    </div><!-- /public -->
+
+    <!-- EKS PRIVATE SUBNETS -->
+    <div class="subnet-zone eks">
+      <div class="zone-label">
+        EKS Private Subnets
+        <span class="zone-cidrs">
+          <span>10.0.32.0/19</span><span>10.0.64.0/19</span><span>10.0.128.0/19</span>
+        </span>
+      </div>
+
+      <!-- EKS Control Plane -->
+      <div class="svc-row">
+        <div class="svc" style="flex:2;">
+          <div class="svc-bar" style="background:var(--aws-orange);"></div>
+          <div class="svc-body">
+            <div class="svc-name">EKS Control Plane</div>
+            <div class="svc-detail">v1.36 · private endpoint · cluster SG sg-0581eb859d41b562d</div>
+          </div>
+        </div>
+        <div class="svc">
+          <div class="svc-bar" style="background:var(--aws-orange);"></div>
+          <div class="svc-body">
+            <div class="svc-name">OIDC Provider</div>
+            <div class="svc-detail">IRSA token exchange</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EKS Cluster box -->
+      <div class="eks-cluster">
+        <div class="eks-cluster-label">
+          EKS Cluster: opsnexus-dev-eks
+          <span class="version">· Kubernetes v1.36</span>
+        </div>
+
+        <!-- System Node Group -->
+        <div class="node-group">
+          <div class="node-group-label">System Node Group · Managed · On-Demand</div>
+          <div class="svc-row">
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">t3.medium</div>
+                <div class="svc-detail">x86_64 · 1a</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">t3.medium</div>
+                <div class="svc-detail">x86_64 · 1b</div>
+              </div>
+            </div>
+          </div>
+          <div class="svc-row mt4">
+            <div class="svc tiny" style="flex:2;">
+              <div class="svc-bar" style="background:rgba(56,189,248,.7);"></div>
+              <div class="svc-body">
+                <div class="svc-name">Karpenter Controller</div>
+                <div class="svc-detail">v1.13.0 · IRSA · interruption SQS queue</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:rgba(167,139,250,.7);"></div>
+              <div class="svc-body">
+                <div class="svc-name">ESO</div>
+                <div class="svc-detail">v0.14 · IRSA</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Karpenter Node Pool -->
+        <div class="node-group">
+          <div class="node-group-label">Karpenter NodePool · c/m/r families · on-demand + spot · al2023@latest</div>
+          <div class="svc-row">
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:rgba(255,153,0,.5);"></div>
+              <div class="svc-body">
+                <div class="svc-name">arm64 node</div>
+                <div class="svc-detail">Spot · 1b</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:rgba(255,153,0,.5);"></div>
+              <div class="svc-body">
+                <div class="svc-name">amd64 node</div>
+                <div class="svc-detail">On-Demand · 1c</div>
+              </div>
+            </div>
+            <div class="svc tiny" style="border-style:dashed;opacity:.5;">
+              <div class="svc-bar" style="background:var(--muted);"></div>
+              <div class="svc-body">
+                <div class="svc-name">scale-on-demand</div>
+                <div class="svc-detail">pending → provisioned</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workloads -->
+        <div class="workloads-section">
+          <div class="workloads-label">Namespace: opsnexus · Workloads</div>
+
+          <!-- Traefik -->
+          <div class="svc-row">
+            <div class="svc" style="flex:1;">
+              <div class="svc-bar" style="background:#38BDF8;"></div>
+              <div class="svc-body">
+                <div class="svc-name">Traefik Ingress</div>
+                <div class="svc-detail class="port">NodePort :30080 → ClusterIP routing</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5 Go services -->
+          <div class="svc-row mt4">
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">auth-service</div>
+                <div class="svc-detail">:8081 · JWT/RBAC</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">tenant-service</div>
+                <div class="svc-detail">:8082 · onboarding</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">workflow-service</div>
+                <div class="svc-detail">:8083 · approvals</div>
+              </div>
+            </div>
+          </div>
+          <div class="svc-row mt4">
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">document-service</div>
+                <div class="svc-detail">:8084 · versioned docs</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:var(--aws-orange);"></div>
+              <div class="svc-body">
+                <div class="svc-name">notification-service</div>
+                <div class="svc-detail">:8085 · async · IRSA→DDB</div>
+              </div>
+            </div>
+            <div class="svc tiny">
+              <div class="svc-bar" style="background:rgba(167,139,250,.7);"></div>
+              <div class="svc-body">
+                <div class="svc-name">ExternalSecrets</div>
+                <div class="svc-detail">SM → k8s Secrets</div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /workloads -->
+      </div><!-- /eks-cluster -->
+    </div><!-- /eks subnet -->
+
+    <!-- DB PRIVATE SUBNETS -->
+    <div class="subnet-zone db">
+      <div class="zone-label">
+        DB Private Subnets
+        <span class="zone-cidrs">
+          <span>10.0.200.0/24</span><span>10.0.201.0/24</span><span>10.0.202.0/24</span>
+        </span>
+      </div>
+      <div class="svc-row">
+        <div class="svc">
+          <div class="svc-bar" style="background:var(--aws-green);"></div>
+          <div class="svc-body">
+            <div class="svc-name">RDS MySQL 8.0</div>
+            <div class="svc-detail">db.t3.small · auth / tenant / workflow DBs · KMS encrypted</div>
+          </div>
+        </div>
+        <div class="svc">
+          <div class="svc-bar" style="background:var(--aws-green);"></div>
+          <div class="svc-body">
+            <div class="svc-name">DocumentDB 5.0</div>
+            <div class="svc-detail">db.t3.medium · documents_db · 1 instance · KMS encrypted</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /db -->
+
+  </div><!-- /vpc-box -->
+
+  <!-- ──────────────── MANAGED SIDEBAR ──────────────── -->
+  <div class="managed-sidebar">
+
+    <!-- Global / Edge -->
+    <div class="ms-group">
+      <div class="ms-group-label">Edge &amp; DNS</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-purple);"></div>
+        <div class="svc-body">
+          <div class="svc-name">Route 53</div>
+          <div class="svc-detail">opsnexus.site · hosted zone</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-pink);"></div>
+        <div class="svc-body">
+          <div class="svc-name">CloudFront (app)</div>
+          <div class="svc-detail">app.dev.opsnexus.site → S3</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-pink);"></div>
+        <div class="svc-body">
+          <div class="svc-name">CloudFront (admin)</div>
+          <div class="svc-detail">admin.dev.opsnexus.site → S3</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-green);"></div>
+        <div class="svc-body">
+          <div class="svc-name">S3 Bucket</div>
+          <div class="svc-detail">customer-portal/ · admin-console/</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Certs -->
+    <div class="ms-group">
+      <div class="ms-group-label">ACM Certificates</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">*.opsnexus.site</div>
+          <div class="svc-detail">us-east-1 · CloudFront</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">api.dev.opsnexus.site</div>
+          <div class="svc-detail">ap-south-1 · API GW regional</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Containers -->
+    <div class="ms-group">
+      <div class="ms-group-label">ECR (5 repos)</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-orange);"></div>
+        <div class="svc-body">
+          <div class="svc-name">opsnexus/auth-service</div>
+          <div class="svc-detail">multi-arch · amd64+arm64</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-orange);"></div>
+        <div class="svc-body">
+          <div class="svc-name">+ 4 more repos</div>
+          <div class="svc-detail">tenant · workflow · document · notification</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data -->
+    <div class="ms-group">
+      <div class="ms-group-label">DynamoDB (2 tables)</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-purple);"></div>
+        <div class="svc-body">
+          <div class="svc-name">notifications</div>
+          <div class="svc-detail">on-demand · KMS encrypted</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-purple);"></div>
+        <div class="svc-body">
+          <div class="svc-name">audit_logs</div>
+          <div class="svc-detail">on-demand · KMS encrypted</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Events -->
+    <div class="ms-group">
+      <div class="ms-group-label">Karpenter Interruption</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-pink);"></div>
+        <div class="svc-body">
+          <div class="svc-name">SQS Queue</div>
+          <div class="svc-detail">opsnexus-dev-karpenter-interruption</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-pink);"></div>
+        <div class="svc-body">
+          <div class="svc-name">EventBridge Rules</div>
+          <div class="svc-detail">Spot interruption · AZ rebalance</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Secrets -->
+    <div class="ms-group">
+      <div class="ms-group-label">Secrets &amp; Keys</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">Secrets Manager</div>
+          <div class="svc-detail">rds · docdb · jwt · app (×4)</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">KMS Keys</div>
+          <div class="svc-detail">rds · docdb · ddb · ecr · sm (×5)</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:rgba(107,130,168,.5);"></div>
+        <div class="svc-body">
+          <div class="svc-name">SSM Parameter Store</div>
+          <div class="svc-detail">/opsnexus/dev/* · IRSA ARNs</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IAM/IRSA -->
+    <div class="ms-group">
+      <div class="ms-group-label">IAM / IRSA</div>
+      <div class="svc">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">Karpenter Role</div>
+          <div class="svc-detail">EC2 · IAM · SQS · SSM</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">ESO Role</div>
+          <div class="svc-detail">SecretsManager · KMS read</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">Notification Role</div>
+          <div class="svc-detail">DynamoDB read/write</div>
+        </div>
+      </div>
+      <div class="svc mt4">
+        <div class="svc-bar" style="background:var(--aws-red);"></div>
+        <div class="svc-body">
+          <div class="svc-name">API GW Usage Plans</div>
+          <div class="svc-detail">Basic 10rps · Pro 100rps · Ent 1000rps</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /managed-sidebar -->
+
+</div><!-- /main-layout -->
+
+<!-- ══════════════ LEGEND ══════════════ -->
+<div class="legend">
+  <span class="legend-label">Legend</span>
+  <span class="legend-item">
+    <span class="legend-dot" style="background:var(--aws-orange);"></span>Compute / EKS
+  </span>
+  <span class="legend-item">
+    <span class="legend-dot" style="background:var(--aws-purple);"></span>Networking / VPC
+  </span>
+  <span class="legend-item">
+    <span class="legend-dot" style="background:var(--aws-green);"></span>Databases
+  </span>
+  <span class="legend-item">
+    <span class="legend-dot" style="background:var(--aws-pink);"></span>Serverless / Events
+  </span>
+  <span class="legend-item">
+    <span class="legend-dot" style="background:var(--aws-red);"></span>Security / IAM
+  </span>
+  <span class="legend-item">
+    <span class="legend-line" style="background:rgba(140,79,255,.5);height:2px;border-top:1px dashed rgba(140,79,255,.5);"></span>VPC boundary
+  </span>
+  <span class="legend-item">
+    <span class="legend-line" style="background:rgba(56,189,248,.4);height:1px;border-top:1px dashed rgba(56,189,248,.4);"></span>Public subnets
+  </span>
+  <span class="legend-item">
+    <span class="legend-line" style="background:rgba(255,153,0,.4);height:1px;border-top:1px dashed rgba(255,153,0,.4);"></span>EKS subnets
+  </span>
+  <span class="legend-item">
+    <span class="legend-line" style="background:rgba(74,222,128,.4);height:1px;border-top:1px dashed rgba(74,222,128,.4);"></span>DB subnets
+  </span>
+  <span class="legend-item" style="margin-left:auto;">
+    <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);display:inline-block;"></span>
+    Animated: live API request path
+  </span>
+</div>

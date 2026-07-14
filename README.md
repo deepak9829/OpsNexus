@@ -18,27 +18,64 @@ OpsNexus lets organizations onboard multiple tenants into a single platform wher
 
 ## Architecture Overview
 
+OpsNexus runs in two modes: locally via Docker Compose or Kubernetes, and in production on AWS EKS.
+
+### AWS Deployment
+
+> Full interactive diagram: [`docs/aws-architecture.html`](docs/aws-architecture.html)
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Frontends                            │
-│   customer-portal (:3000)     admin-console (:3001)         │
-└───────────────────┬───────────────────┬─────────────────────┘
-                    │                   │
-┌───────────────────▼───────────────────▼─────────────────────┐
-│                   API Gateway / Nginx (:8080)                │
-└──┬────────────┬──────────────┬───────────────┬──────────────┘
-   │            │              │               │            │
-   ▼            ▼              ▼               ▼            ▼
-auth(:8081) tenant(:8082) workflow(:8083) document(:8084) notify(:8085)
-   │            │              │               │            │
-   ▼            ▼              ▼               ▼            ▼
- MySQL        MySQL          MySQL          MongoDB     DynamoDB
-(auth_db)  (tenant_db)   (workflow_db)  (documents_db) (LocalStack)
+Internet
+  ├── Route 53 (opsnexus.site)
+  │     ├── app.dev.opsnexus.site   → CloudFront → S3 (customer-portal/)
+  │     ├── admin.dev.opsnexus.site → CloudFront → S3 (admin-console/)
+  │     └── api.dev.opsnexus.site   → API Gateway (Regional, ap-south-1)
+  │                                       │
+  │                                 Lambda JWT Authorizer (Node.js 20.x)
+  │                                       │
+  │                                   VPC Link → NLB (:30080)
+  │
+  └── VPC 10.0.0.0/16  ·  ap-south-1  ·  3 AZs
+        │
+        ├── Public subnets (.1–.3/24)
+        │     Internet Gateway · NAT Gateway (1a) · NLB
+        │
+        ├── EKS private subnets (.32, .64, .128 /19)
+        │     EKS v1.36 · opsnexus-dev-eks
+        │       ├── System nodes: 2× t3.medium (on-demand)
+        │       ├── Karpenter v1.13: c/m/r families, spot+OD, al2023@latest
+        │       └── Namespace: opsnexus
+        │             Traefik (NodePort :30080) → ClusterIP routing
+        │             auth :8081  tenant :8082  workflow :8083
+        │             document :8084  notification :8085 (IRSA → DynamoDB)
+        │             External Secrets Operator (IRSA → Secrets Manager)
+        │
+        └── DB private subnets (.200–.202/24)
+              RDS MySQL 8.0 (db.t3.small) · DocumentDB 5.0 (db.t3.medium)
+
+Managed services (outside VPC):
+  DynamoDB ×2 (notifications, audit_logs, on-demand)
+  ECR ×5 repos (multi-arch amd64+arm64)
+  Secrets Manager ×4 · KMS ×5
+  SQS + EventBridge (Karpenter spot interruption handling)
+  IRSA roles: karpenter-controller · eso · notification-service
+  API GW usage plans: Basic 10 rps · Pro 100 rps · Enterprise 1000 rps
+```
+
+### Local service graph
+
+```
+customer-portal (:3000)     admin-console (:3001)
+         └──────────────┬──────────────┘
+                        ▼
+      auth    tenant   workflow  document  notification
+    (:8081) (:8082)  (:8083)  (:8084)    (:8085)
+       │       │        │        │            │
+     MySQL   MySQL    MySQL   MongoDB      DynamoDB
+                                          (LocalStack)
 ```
 
 All services communicate over the `opsnexus-net` Docker bridge network. Each service owns its datastore — no shared DB connections.
-
-For a full architecture diagram see `docs/architecture.png` (generated separately).
 
 ---
 
@@ -332,9 +369,14 @@ Claude Code project instructions are in `/skills/CLAUDE.md`. These encode the co
 |--------|-----------|
 | **Go 1.22** | Excellent concurrency primitives, small Docker images, fast builds. Workspace mode (`go.work`) lets all 5 services live in one repo without publishing modules. |
 | **MySQL 8.0** | Battle-tested ACID compliance for transactional data (auth, tenant config, workflows). Per-service databases enforce bounded contexts. |
-| **MongoDB 7.0** | Flexible schema for documents with varying metadata shapes; native binary storage support. |
-| **DynamoDB (LocalStack)** | Event-driven notifications and audit logs benefit from DynamoDB's single-digit millisecond reads and infinite scale. LocalStack gives parity locally without cloud cost. |
+| **DocumentDB 5.0** | MongoDB-compatible API, AWS-managed, multi-AZ capable. Flexible schema for documents with varying metadata shapes. |
+| **DynamoDB (on-demand)** | Single-digit millisecond reads for notifications and audit logs; scales to zero cost at rest. |
 | **React + Vite** | Vite's instant HMR dramatically speeds up frontend iteration. React ecosystem maturity for complex admin UIs. |
+| **EKS + Karpenter** | Managed control plane reduces ops burden; Karpenter provisions right-sized nodes on demand (c/m/r families, spot+OD) rather than pre-provisioning fixed node groups. |
+| **Traefik as ingress** | Single NodePort entry point into the cluster; path-based routing to all 5 services without per-service load balancers. Deployed via Helm, configured with IngressRoutes. |
+| **External Secrets Operator** | Secrets Manager values are projected into Kubernetes Secrets at runtime via IRSA — no credentials ever touch CI or git. |
+| **API Gateway + Lambda authorizer** | Centralises JWT validation at the edge; 300 s cache means the authorizer Lambda is not called on every request. Usage plans enforce per-tier rate limits (10 / 100 / 1000 rps). |
+| **Terraform (12 modules)** | Each AWS concern (vpc, subnets, routing, eks, rds, ecr, …) is a self-contained module. S3-backed remote state with per-environment workspaces. |
 | **Docker Compose profiles** | `profiles: ["app"]` keeps infra and app containers decoupled — developers can run services locally against Dockerized infra without rebuilding images on every change. |
 | **golangci-lint** | Aggregates 60+ linters in a single fast pass; catches bugs (errcheck, staticcheck) and style issues before review. |
 
