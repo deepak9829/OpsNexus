@@ -408,26 +408,28 @@ resource "aws_api_gateway_integration" "proxy_any" {
 resource "aws_api_gateway_deployment" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
 
+  # Hash stable config values (all known at plan time) instead of resource
+  # attributes — avoids "inconsistent final plan" when new for_each resources
+  # (parent_any) are created and their IDs are unknown until apply.
   triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.services,
-      aws_api_gateway_resource.proxy,
-      aws_api_gateway_method.proxy_any,
-      aws_api_gateway_integration.proxy_any,
-      aws_api_gateway_method.parent_any,
-      aws_api_gateway_integration.parent_any,
-      aws_api_gateway_method.options_parent,
-      aws_api_gateway_method.options_proxy,
-      aws_api_gateway_gateway_response.cors_4xx,
-      aws_api_gateway_gateway_response.cors_5xx,
-    ]))
+    redeployment = sha1(jsonencode({
+      service_paths = local.service_paths
+      nlb_dns       = aws_lb.nlb.dns_name
+      vpc_link_id   = aws_api_gateway_vpc_link.main.id
+      authorizer_id = aws_api_gateway_authorizer.jwt.id
+      cors_headers  = local.cors_allow_headers
+      cors_methods  = local.cors_allow_methods
+    }))
   }
 
   lifecycle {
     create_before_destroy = true
   }
 
-  depends_on = [aws_api_gateway_integration.proxy_any]
+  depends_on = [
+    aws_api_gateway_integration.proxy_any,
+    aws_api_gateway_integration.parent_any,
+  ]
 }
 
 resource "aws_api_gateway_stage" "main" {
