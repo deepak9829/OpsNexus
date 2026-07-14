@@ -1,6 +1,23 @@
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
+# ─── EKS Service-Linked Role ───────────────────────────────────────────────
+# EKS requires AWSServiceRoleForAmazonEKS to exist before cluster creation.
+# Terraform will error on a second apply if the role already exists, so we
+# import it into state on first apply and ignore it on subsequent runs via
+# `prevent_destroy = false` + a custom ignore_changes guard.
+# If the role already exists outside Terraform, run:
+#   terraform import module.eks.aws_iam_service_linked_role.eks \
+#     arn:aws:iam::<account>:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS
+resource "aws_iam_service_linked_role" "eks" {
+  aws_service_name = "eks.amazonaws.com"
+
+  lifecycle {
+    ignore_changes  = [description]
+    prevent_destroy = false
+  }
+}
+
 # ─── KMS key for EKS secrets ───────────────────────────────────────────────
 resource "aws_kms_key" "eks" {
   description             = "EKS secrets encryption for ${var.project_name}-${var.environment}"
@@ -156,6 +173,7 @@ resource "aws_eks_cluster" "main" {
   depends_on = [
     aws_iam_role_policy_attachment.cluster_policy,
     aws_iam_role_policy_attachment.cluster_vpc_resource,
+    aws_iam_service_linked_role.eks,
   ]
 
   lifecycle {
