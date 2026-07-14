@@ -194,23 +194,6 @@ module "api_gateway" {
   depends_on = [module.eks]
 }
 
-# These three SG rules were created manually during Karpenter node registration
-# incident remediation; import them so Terraform adopts rather than recreates.
-import {
-  to = module.eks.aws_security_group_rule.node_to_cluster_https
-  id = "sgr-07790656b1c2a0b9a"
-}
-
-import {
-  to = module.eks.aws_security_group_rule.cluster_to_node_https
-  id = "sgr-0c628fca9170a0106"
-}
-
-import {
-  to = module.eks.aws_security_group_rule.cluster_to_node_kubelet
-  id = "sgr-03754f141e36c3ed9"
-}
-
 # Wire EKS node ASG → NLB target group so nodes auto-register/deregister
 # as Karpenter scales the cluster. This runs outside the api_gateway module
 # to avoid a circular dependency (api_gateway doesn't need to know EKS internals).
