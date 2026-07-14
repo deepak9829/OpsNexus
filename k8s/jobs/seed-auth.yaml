@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-auth
+  namespace: opsnexus
+  labels:
+    app: seed-auth
+    component: seed
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: seed-auth
+        component: seed
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: ${SEED_IMAGE_AUTH}
+          command: ["/seed"]
+          env:
+            - name: AUTH_SERVICE_PORT
+              value: "8081"
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
+            - name: AUTH_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: password
+            - name: AUTH_DB_NAME
+              value: auth_db
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_SECRET
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-tenant
+  namespace: opsnexus
+  labels:
+    app: seed-tenant
+    component: seed
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: seed-tenant
+        component: seed
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: ${SEED_IMAGE_TENANT}
+          command: ["/seed"]
+          env:
+            - name: TENANT_SERVICE_PORT
+              value: "8082"
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: host
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: port
+            - name: TENANT_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: username
+            - name: TENANT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rds-secret
+                  key: password
+            - name: TENANT_DB_NAME
+              value: tenant_db
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

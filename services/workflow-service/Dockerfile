@@ -19,13 +19,19 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
     -ldflags="-s -w -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" \
     -o server \
-    ./cmd/server/main.go
+    ./cmd/server/main.go && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+    -ldflags="-s -w" \
+    -o seed \
+    ./cmd/seed/main.go
 
 # ── Final image ───────────────────────────────────────────────────────────────
 # distroless/static includes ca-certificates and tzdata; no shell, no package manager.
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /build/server /server
+COPY --from=builder /build/seed /seed
 
 EXPOSE 8083
 

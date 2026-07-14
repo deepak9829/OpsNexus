@@ -30,6 +30,11 @@ on:
       image_tag:
         description: 'Image tag to deploy (default: latest commit SHA)'
         required: false
+      seed:
+        description: 'Run seed jobs after deploy (auth, tenant, workflow)'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-eks-${{ github.ref }}
@@ -249,6 +254,36 @@ jobs:
           kubectl get pods -n opsnexus -o wide
           echo "=== Services ==="
           kubectl get svc -n opsnexus
+
+      - name: Run seed jobs
+        if: github.event.inputs.seed == 'true'
+        env:
+          ECR: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ needs.resolve.outputs.image_tag }}
+        run: |
+          export SEED_IMAGE_AUTH="${ECR}/opsnexus/auth-service:${TAG}"
+          export SEED_IMAGE_TENANT="${ECR}/opsnexus/tenant-service:${TAG}"
+          export SEED_IMAGE_WORKFLOW="${ECR}/opsnexus/workflow-service:${TAG}"
+
+          # Delete any previous (completed/failed) seed jobs so re-runs work
+          kubectl delete job seed-auth seed-tenant seed-workflow \
+            -n opsnexus --ignore-not-found=true
+
+          envsubst < k8s/jobs/seed-auth.yaml     | kubectl apply -n opsnexus -f -
+          envsubst < k8s/jobs/seed-tenant.yaml   | kubectl apply -n opsnexus -f -
+          envsubst < k8s/jobs/seed-workflow.yaml | kubectl apply -n opsnexus -f -
+
+          echo "Waiting for seed-auth..."
+          kubectl wait job/seed-auth -n opsnexus --for=condition=complete --timeout=120s
+          echo "Waiting for seed-tenant..."
+          kubectl wait job/seed-tenant -n opsnexus --for=condition=complete --timeout=120s
+          echo "Waiting for seed-workflow..."
+          kubectl wait job/seed-workflow -n opsnexus --for=condition=complete --timeout=120s
+
+          echo "All seed jobs completed."
+          kubectl logs -n opsnexus -l app=seed-auth     --tail=20 || true
+          kubectl logs -n opsnexus -l app=seed-tenant   --tail=20 || true
+          kubectl logs -n opsnexus -l app=seed-workflow --tail=20 || true
 
       - name: Rollback on failure
         if: failure()
