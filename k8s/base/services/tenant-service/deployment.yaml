@@ -23,6 +23,8 @@ spec:
           imagePullPolicy: Always
           args: ["migrate"]
           env:
+            - name: TENANT_SERVICE_PORT
+              value: "8082"
             - name: MYSQL_HOST
               valueFrom:
                 secretKeyRef:
