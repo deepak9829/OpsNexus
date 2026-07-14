@@ -40,6 +40,11 @@ spec:
           env:
             - name: DOCUMENT_SERVICE_PORT
               value: "8084"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: docdb-secret
+                  key: connection_string
             - name: DOCDB_HOST
               valueFrom:
                 secretKeyRef:

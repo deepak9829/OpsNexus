@@ -218,14 +218,27 @@ jobs:
         # Only update image tags when triggered by a successful image build.
         # Push events (manifest-only changes) must not override tags with an
         # unbuilt SHA — the overlay already carries the last-deployed tag.
+        # Only updates a service's tag if the image actually exists in ECR —
+        # build-push only rebuilds changed services, so not all SHAs exist.
         if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && needs.resolve.outputs.image_tag != '')
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
         run: |
           ECR="${{ steps.login-ecr.outputs.registry }}"
           TAG="${{ needs.resolve.outputs.image_tag }}"
+          REGION="${{ needs.resolve.outputs.aws_region }}"
 
           for SVC in auth-service tenant-service workflow-service document-service notification-service; do
-            kustomize edit set image "opsnexus/${SVC}=${ECR}/opsnexus/${SVC}:${TAG}"
+            if aws ecr describe-images \
+                --repository-name "opsnexus/${SVC}" \
+                --image-ids "imageTag=${TAG}" \
+                --region "${REGION}" \
+                --output text \
+                --query 'imageDetails[0].imageTags[0]' 2>/dev/null | grep -q "${TAG}"; then
+              kustomize edit set image "opsnexus/${SVC}=${ECR}/opsnexus/${SVC}:${TAG}"
+              echo "✓ Updated opsnexus/${SVC} → ${TAG}"
+            else
+              echo "⚠ Skipping opsnexus/${SVC} — tag ${TAG} not in ECR (not rebuilt this run)"
+            fi
           done
 
       - name: Apply Kustomize overlay
