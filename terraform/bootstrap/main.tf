@@ -252,11 +252,13 @@ variable "aws_profile" {
 variable "github_org" {
   type        = string
   description = "GitHub organization or username"
+  default     = "deepak9829"
 }
 
 variable "github_repo" {
   type        = string
   description = "GitHub repository name"
+  default     = "OpsNexus"
 }
 
 variable "create_github_oidc_provider" {
