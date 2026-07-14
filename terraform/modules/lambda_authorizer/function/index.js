@@ -19,6 +19,15 @@ async function getJwtSecret() {
   return _cachedSecret;
 }
 
+// Build a wildcard ARN covering all methods in the stage so the cached
+// policy works for every endpoint, not just the one that primed the cache.
+// methodArn format: arn:aws:execute-api:{region}:{account}:{apiId}/{stage}/{method}/{resource}
+function stageWildcardArn(methodArn) {
+  const parts = methodArn.split(':');
+  const [apiId, stage] = parts[5].split('/');
+  return `${parts.slice(0, 5).join(':')}:${apiId}/${stage}/*/*`;
+}
+
 exports.handler = async (event) => {
   const token = (event.authorizationToken || '').replace(/^Bearer\s+/i, '');
   if (!token) return generatePolicy('anonymous', 'Deny', event.methodArn);
@@ -40,7 +49,7 @@ exports.handler = async (event) => {
     if (payload.exp && payload.exp < now)
       return generatePolicy(payload.sub || 'anonymous', 'Deny', event.methodArn);
 
-    const policy = generatePolicy(payload.sub || 'user', 'Allow', event.methodArn);
+    const policy = generatePolicy(payload.sub || 'user', 'Allow', stageWildcardArn(event.methodArn));
     policy.context = {
       userId:   payload.sub   || '',
       tenantId: payload.tid   || '',
