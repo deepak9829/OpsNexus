@@ -9,19 +9,19 @@ resources:
 # Images are updated by CI/CD: kustomize edit set image
 images:
   - name: opsnexus/auth-service
-    newName: 054037129932.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/auth-service
+    newName: 629068384229.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/auth-service
     newTag: latest
   - name: opsnexus/tenant-service
-    newName: 054037129932.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/tenant-service
+    newName: 629068384229.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/tenant-service
     newTag: latest
   - name: opsnexus/workflow-service
-    newName: 054037129932.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/workflow-service
+    newName: 629068384229.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/workflow-service
     newTag: latest
   - name: opsnexus/document-service
-    newName: 054037129932.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/document-service
+    newName: 629068384229.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/document-service
     newTag: latest
   - name: opsnexus/notification-service
-    newName: 054037129932.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/notification-service
+    newName: 629068384229.dkr.ecr.ap-south-1.amazonaws.com/opsnexus/notification-service
     newTag: latest
 
 patches:

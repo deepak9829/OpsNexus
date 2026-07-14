@@ -92,7 +92,8 @@ jobs:
             prod)    REGION="ap-southeast-1" ;;
           esac
 
-          KARPENTER_ROLE_ARN="arn:aws:iam::054037129932:role/opsnexus-${ENV}-karpenter-controller"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          KARPENTER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/opsnexus-${ENV}-karpenter-controller"
 
           echo "environment=${ENV}"                           >> "$GITHUB_OUTPUT"
           echo "aws_region=${REGION}"                         >> "$GITHUB_OUTPUT"
