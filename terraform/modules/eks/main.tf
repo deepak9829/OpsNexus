@@ -105,14 +105,6 @@ resource "aws_security_group" "eks_nodes" {
 # rules so the control plane can reach their kubelets (10250) and so nodes can
 # be reached for exec/logs. The cluster SG also needs to allow inbound 443 from
 # the node SG so nodes can connect to the EKS private API endpoint.
-
-# This rule was created manually during incident remediation; import it so
-# Terraform owns it without trying to recreate it.
-import {
-  to = aws_security_group_rule.node_to_cluster_https
-  id = "sgr-07790656b1c2a0b9a"
-}
-
 resource "aws_security_group_rule" "node_to_cluster_https" {
   security_group_id        = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
   type                     = "ingress"
@@ -125,11 +117,6 @@ resource "aws_security_group_rule" "node_to_cluster_https" {
   depends_on = [aws_eks_cluster.main]
 }
 
-import {
-  to = aws_security_group_rule.cluster_to_node_https
-  id = "sgr-0c628fca9170a0106"
-}
-
 resource "aws_security_group_rule" "cluster_to_node_https" {
   security_group_id        = aws_security_group.eks_nodes.id
   type                     = "ingress"
@@ -140,11 +127,6 @@ resource "aws_security_group_rule" "cluster_to_node_https" {
   description              = "EKS control plane to node HTTPS"
 
   depends_on = [aws_eks_cluster.main]
-}
-
-import {
-  to = aws_security_group_rule.cluster_to_node_kubelet
-  id = "sgr-03754f141e36c3ed9"
 }
 
 resource "aws_security_group_rule" "cluster_to_node_kubelet" {
