@@ -194,7 +194,7 @@ jobs:
         env:
           PROJECT_NAME: opsnexus
           ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
-          NODE_ROLE_NAME: opsnexus-${{ needs.resolve.outputs.environment }}-node-role
+          NODE_ROLE_NAME: opsnexus-${{ needs.resolve.outputs.environment }}-eks-node-role
         run: |
           envsubst < k8s/karpenter/ec2nodeclass.yaml | kubectl apply -f -
           envsubst < k8s/karpenter/nodepool.yaml     | kubectl apply -f -

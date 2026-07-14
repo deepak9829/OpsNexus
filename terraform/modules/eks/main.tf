@@ -381,11 +381,13 @@ resource "aws_iam_role_policy" "karpenter_controller" {
           "ec2:CreateTags",
           "ec2:DeleteLaunchTemplate",
           "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeCapacityReservations",
           "ec2:DescribeImages",
           "ec2:DescribeInstances",
           "ec2:DescribeInstanceTypeOfferings",
           "ec2:DescribeInstanceTypes",
           "ec2:DescribeLaunchTemplates",
+          "ec2:DescribePlacementGroups",
           "ec2:DescribeSecurityGroups",
           "ec2:DescribeSpotPriceHistory",
           "ec2:DescribeSubnets",
@@ -394,11 +396,52 @@ resource "aws_iam_role_policy" "karpenter_controller" {
         ]
         Resource = "*"
       },
+      # Karpenter v1 auto-creates/manages an EC2 instance profile from the
+      # EC2NodeClass `role:` field — requires full instance profile lifecycle.
+      {
+        Sid    = "AllowInstanceProfileManagement"
+        Effect = "Allow"
+        Action = [
+          "iam:AddRoleToInstanceProfile",
+          "iam:CreateInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:ListInstanceProfiles",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:TagInstanceProfile",
+        ]
+        Resource = "*"
+      },
       {
         Sid      = "AllowPassRole"
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
         Resource = aws_iam_role.node.arn
+      },
+      # Required for al2023@latest AMI alias resolution via SSM Parameter Store.
+      {
+        Sid      = "AllowSSMParameterRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:*:*:parameter/aws/service/eks/optimized-ami/*"
+      },
+      # Required for spot instance pricing data and spot fleet creation.
+      {
+        Sid      = "AllowPricingRead"
+        Effect   = "Allow"
+        Action   = ["pricing:GetProducts"]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowSpotServiceLinkedRole"
+        Effect = "Allow"
+        Action = ["iam:CreateServiceLinkedRole"]
+        Resource = "arn:aws:iam::*:role/aws-service-role/spot.amazonaws.com/AWSServiceRoleForEC2Spot"
+        Condition = {
+          StringEquals = {
+            "iam:AWSServiceName" = "spot.amazonaws.com"
+          }
+        }
       },
       {
         Sid    = "AllowSQS"
