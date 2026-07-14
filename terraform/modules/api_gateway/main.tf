@@ -213,6 +213,46 @@ resource "aws_api_gateway_method" "proxy_any" {
 locals {
   cors_allow_headers = "Accept,Authorization,Content-Type,X-Request-ID,X-Tenant-ID,X-User-ID,x-api-key"
   cors_allow_methods = "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+
+  # Only non-public services need the parent ANY method (public /auth uses proxy+ only)
+  protected_service_paths = { for k, v in local.service_paths : k => v if !v.public }
+}
+
+# ANY method on parent resource (/cases, /notifications, etc.) — handles list+create endpoints
+# that don't have a path segment (GET /cases, POST /cases) which don't match {proxy+}.
+resource "aws_api_gateway_method" "parent_any" {
+  for_each = local.protected_service_paths
+
+  rest_api_id      = aws_api_gateway_rest_api.main.id
+  resource_id      = aws_api_gateway_resource.services[each.key].id
+  http_method      = "ANY"
+  authorization    = "CUSTOM"
+  authorizer_id    = aws_api_gateway_authorizer.jwt.id
+  api_key_required = true
+
+  request_parameters = {
+    "method.request.header.Authorization" = false
+  }
+}
+
+resource "aws_api_gateway_integration" "parent_any" {
+  for_each = local.protected_service_paths
+
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.services[each.key].id
+  http_method             = aws_api_gateway_method.parent_any[each.key].http_method
+  integration_http_method = "ANY"
+  type                    = "HTTP_PROXY"
+  connection_type         = "VPC_LINK"
+  connection_id           = aws_api_gateway_vpc_link.main.id
+
+  uri = "http://${aws_lb.nlb.dns_name}/api/v1/${each.value.path}"
+
+  request_parameters = {
+    "integration.request.header.X-User-Id"    = "context.authorizer.userId"
+    "integration.request.header.X-Tenant-Id"  = "context.authorizer.tenantId"
+    "integration.request.header.X-User-Roles" = "context.authorizer.roles"
+  }
 }
 
 # OPTIONS method on parent resource (handles /cases, /tenants etc. with no trailing path)
@@ -374,6 +414,8 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.proxy,
       aws_api_gateway_method.proxy_any,
       aws_api_gateway_integration.proxy_any,
+      aws_api_gateway_method.parent_any,
+      aws_api_gateway_integration.parent_any,
       aws_api_gateway_method.options_parent,
       aws_api_gateway_method.options_proxy,
       aws_api_gateway_gateway_response.cors_4xx,

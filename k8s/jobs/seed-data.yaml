@@ -13,8 +13,8 @@ data:
     BASE_NOTIF="${BASE_NOTIF:-http://localhost:8085/api/v1}"
     TENANT="00000000-0000-0000-0000-000000000001"
 
-    log() { echo "  ✓ $1"; }
-    err() { echo "  ✗ $1"; }
+    log() { echo "  ✓ $1" >&2; }
+    err() { echo "  ✗ $1" >&2; }
 
     # ── 1. Auth ────────────────────────────────────────────────────────────────
     echo ""
@@ -278,9 +278,7 @@ spec:
           command:
             - bash
             - -c
-            - |
-              apt-get update -qq && apt-get install -y -qq curl
-              bash /scripts/seed-data.sh
+            - "apt-get update -qq && apt-get install -y -qq curl && bash /scripts/seed-data.sh"
           env:
             - name: BASE_AUTH
               value: "http://auth-service:8081/api/v1"
