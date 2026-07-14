@@ -194,11 +194,13 @@ jobs:
           envsubst < k8s/karpenter/ec2nodeclass.yaml | kubectl apply -f -
           envsubst < k8s/karpenter/nodepool.yaml     | kubectl apply -f -
 
-      - name: Apply ClusterSecretStore
+      - name: Apply ClusterSecretStore and ExternalSecrets
         env:
           AWS_REGION: ${{ needs.resolve.outputs.aws_region }}
           ENVIRONMENT: ${{ needs.resolve.outputs.environment }}
         run: |
+          kubectl create namespace opsnexus --dry-run=client -o yaml | kubectl apply -f -
+
           envsubst < k8s/external-secrets/cluster-secret-store.yaml | kubectl apply -f -
           envsubst < k8s/external-secrets/rds-secret.yaml            | kubectl apply -f -
           envsubst < k8s/external-secrets/docdb-secret.yaml          | kubectl apply -f -
