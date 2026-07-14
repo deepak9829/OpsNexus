@@ -15,10 +15,10 @@ type Config struct {
 
 func Load() (*Config, error) {
 	viper.SetDefault("NOTIFICATION_SERVICE_PORT", "8085")
-	viper.SetDefault("AWS_ENDPOINT_URL", "http://localhost:4566")
+	viper.SetDefault("AWS_ENDPOINT_URL", "")
 	viper.SetDefault("AWS_REGION", "us-east-1")
-	viper.SetDefault("AWS_ACCESS_KEY_ID", "test")
-	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "test")
+	viper.SetDefault("AWS_ACCESS_KEY_ID", "")
+	viper.SetDefault("AWS_SECRET_ACCESS_KEY", "")
 	viper.SetDefault("DYNAMODB_NOTIFICATIONS_TABLE", "notifications")
 	viper.SetDefault("DYNAMODB_AUDIT_TABLE", "audit_events")
 	viper.SetDefault("SERVER_ENV", "development")
