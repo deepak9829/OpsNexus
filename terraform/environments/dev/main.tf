@@ -202,6 +202,31 @@ resource "aws_autoscaling_attachment" "traefik_nlb" {
   lb_target_group_arn    = module.api_gateway.traefik_target_group_arn
 }
 
+# ─── Karpenter node → database access ────────────────────────────────────
+# dev/main.tf passes module.eks.cluster_sg_id to the documentdb and rds
+# modules, which covers system managed-node-group pods. Karpenter-provisioned
+# nodes use the custom eks_nodes SG (selected by EC2NodeClass tag), so they
+# need their own ingress rules on both database security groups.
+resource "aws_security_group_rule" "docdb_from_karpenter_nodes" {
+  security_group_id        = module.documentdb.security_group_id
+  type                     = "ingress"
+  from_port                = 27017
+  to_port                  = 27017
+  protocol                 = "tcp"
+  source_security_group_id = module.eks.node_sg_id
+  description              = "Karpenter nodes to DocumentDB"
+}
+
+resource "aws_security_group_rule" "rds_from_karpenter_nodes" {
+  security_group_id        = module.rds.rds_sg_id
+  type                     = "ingress"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  source_security_group_id = module.eks.node_sg_id
+  description              = "Karpenter nodes to RDS MySQL"
+}
+
 # ─── ACM Certificates ─────────────────────────────────────────────────────
 # Created before frontend so the cert ARN can be passed to CloudFront.
 # Route53 A records are created AFTER frontend to avoid the cycle:
