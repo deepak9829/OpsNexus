@@ -17,18 +17,6 @@ spec:
         app: document-service
         component: service
     spec:
-      initContainers:
-        - name: fetch-docdb-cert
-          image: curlimages/curl:8.7.1
-          command:
-            - sh
-            - -c
-            - |
-              curl -sSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
-                -o /etc/ssl/docdb/global-bundle.pem
-          volumeMounts:
-            - name: docdb-certs
-              mountPath: /etc/ssl/docdb
       containers:
         - name: document-service
           image: opsnexus/document-service:latest
@@ -98,4 +86,5 @@ spec:
               memory: 256Mi
       volumes:
         - name: docdb-certs
-          emptyDir: {}
+          configMap:
+            name: docdb-ca-bundle

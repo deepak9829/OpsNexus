@@ -44,7 +44,7 @@ jobs:
           # Single-branch strategy: main always deploys to dev
           ENV="dev"
           REGION="ap-south-1"
-          API_BASE_URL="https://api.dev.opsnexus.site"
+          API_BASE_URL="https://api.dev.opsnexus.site/api/v1"
 
           echo "environment=${ENV}"         >> "$GITHUB_OUTPUT"
           echo "aws_region=${REGION}"       >> "$GITHUB_OUTPUT"
